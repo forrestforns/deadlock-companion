@@ -28,19 +28,30 @@ fn game_dirs(steam: &PathBuf) -> Vec<PathBuf> {
     libs.into_iter().map(|l| l.join("steamapps").join("common").join("Deadlock")).filter(|d| d.is_dir()).collect()
 }
 
-/// Id of the online match in the log: the last "Lobby X for Match Y created" followed by a
-/// connection to a remote server (the hideout also creates a local match, on loopback).
+/// Id of the match being played, from the game log. A "Lobby X for Match Y created" line is
+/// followed by "Persisting reconnect info: server_steam_id: S"; the match is live only while
+/// connected to that server ("Connected to '=[A:1:<S % 2^32>:…'"). Other remote servers (the
+/// hideout), a disconnect or the PostGame state mean we're no longer in it.
 pub fn match_id_from_log(log: &str) -> Option<u64> {
+    let num_after = |line: &str, key: &str| -> Option<u64> {
+        let rest = &line[line.find(key)? + key.len()..];
+        rest.trim_start().split(|c: char| !c.is_ascii_digit()).next()?.parse().ok()
+    };
     let mut current: Option<u64> = None;
+    let mut server: Option<u64> = None; // account part of the match server's steam id
     let mut online: Option<u64> = None;
     for line in log.lines() {
-        if let Some(rest) = line.split("for Match ").nth(1) {
-            if line.contains("Lobby ") && rest.trim_end().ends_with("created") {
-                current = rest.split_whitespace().next().and_then(|n| n.parse().ok());
-                online = None;
-            }
-        } else if line.contains("Connected to '=[A:") {
-            online = current;
+        if line.contains("Lobby ") && line.contains("for Match ") && line.trim_end().ends_with("created") {
+            current = num_after(line, "for Match ");
+            server = None;
+            online = None;
+        } else if line.contains("Persisting reconnect info") {
+            server = num_after(line, "server_steam_id:").map(|s| s % (1u64 << 32));
+        } else if line.contains("Connected to '=[A:1:") {
+            let connected = num_after(line, "=[A:1:");
+            online = if connected.is_some() && connected == server { current } else { None };
+        } else if line.contains("Disconnecting from server") || line.contains("OnGameStateChanged: PostGame") {
+            online = None;
         }
     }
     online
@@ -160,20 +171,41 @@ pub async fn live_players(url: String) -> Result<Value, String> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn finds_online_match_not_hideout() {
-        let log = "\
-11/14 15:52:38 Lobby 102166054893422416 for Match 137285346 created
-11/14 15:52:39 [Client] CL:  Connected to 'loopback:1'
-11/14 16:00:17 Lobby 174223648931389985 for Match 137307683 created
-11/14 16:00:18 [Client] CL:  Connected to '=[A:1:185569309:52492]'
-11/14 16:30:00 Lobby 1 for Match 999 created
+    // real lines from a game log (match 137487528, server account 1640640517)
+    const LOG: &str = "\
+11/14 21:25:30 OnGameStateChanged: PostGame (8)
+11/14 21:25:40 [Client] Disconnecting from server: NETWORK_DISCONNECT_DISCONNECT_BY_USER
+11/14 21:25:41 [Client] CL:  Connected to 'loopback:1'
+11/14 21:25:41 [Client] CL:  Connected to '=[A:1:1703283742:52499]'
+11/14 21:38:12 Lobby 174223648931579271 for Match 137487528 created
+11/14 21:38:12 Persisting reconnect info to disk: server_steam_id: 90297475676123141 lobby_id: 174223648931579271 time_updated: 1794688692
+11/14 21:38:12 [Client] Disconnecting from server: NETWORK_DISCONNECT_SHUTDOWN
+11/14 21:38:13 [Client] CL:  Connected to 'loopback:1'
+11/14 21:38:18 [Client] CL:  Connected to '127.0.0.1:27015'
+11/14 21:39:26 [Client] Disconnecting from server: NETWORK_DISCONNECT_LOOPDEACTIVATE
+11/14 21:39:27 [Client] CL:  Connected to '=[A:1:1640640517:52499]'
+11/14 21:40:05 OnGameStateChanged: GameInProgress (7)
 ";
-        // the last lobby (hideout, no remote connection yet) is not an online match
-        assert_eq!(match_id_from_log(log), None);
-        let log2 = &log[..log.find("11/14 16:30").unwrap()];
-        assert_eq!(match_id_from_log(log2), Some(137307683));
+
+    #[test]
+    fn finds_match_only_on_its_own_server() {
+        assert_eq!(match_id_from_log(LOG), Some(137487528));
+        // before joining the match server: not live yet
+        let joining = &LOG[..LOG.find("11/14 21:39:27").unwrap()];
+        assert_eq!(match_id_from_log(joining), None);
+        // after the match: post-game, then back to the hideout (another remote server)
+        let after = format!("{LOG}11/14 22:30:00 OnGameStateChanged: PostGame (8)\n11/14 22:30:10 [Client] CL:  Connected to '=[A:1:1703283742:52499]'\n");
+        assert_eq!(match_id_from_log(&after), None);
+        // the hideout's remote server alone is never a match
+        assert_eq!(match_id_from_log(&LOG[..LOG.find("11/14 21:38:12").unwrap()]), None);
         assert_eq!(match_id_from_log("nothing"), None);
+    }
+
+    /// manual check of the detection on the real game log (no network): `cargo test log_now -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn log_now() {
+        println!("partie détectée : {:?}", current_match());
     }
 
     /// manual end-to-end check during a real match: `cargo test -- --ignored --nocapture`
