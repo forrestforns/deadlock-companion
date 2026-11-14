@@ -35,18 +35,18 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 const isWin = (m) => m.match_result === m.player_team;
 const wrClass = (wr) => (wr >= 52 ? 'wr-good' : wr <= 48 ? 'wr-bad' : '');
 const TYPES = { marksman: 'Tireur', mystic: 'Mystique', brawler: 'Bagarreur', assassin: 'Assassin' };
-const roleName = (t) => TYPES[t] || (t ? t[0].toUpperCase() + t.slice(1) : 'Autre');
+const roleName = (r) => (TYPES[r] ? tr(TYPES[r]) : r ? r[0].toUpperCase() + r.slice(1) : tr('Autre'));
 const TIERS = ['', 'I', 'II', 'III', 'IV', 'V'];
 // builds made in-game keep the game's untranslated category keys
 const CATS = { EarlyGame: 'Début de partie', MidGame: 'Milieu de partie', LateGame: 'Fin de partie' };
 const catName = (n) => {
   const key = String(n ?? '').match(/^#Citadel_HeroBuilds_(\w+)/)?.[1];
-  return key ? CATS[key] || key : n || '';
+  return key ? (CATS[key] ? tr(CATS[key]) : key) : n || '';
 };
 
 async function api(path) {
   const r = await fetch(API + path);
-  if (!r.ok) throw new Error(r.status === 429 ? 'Trop de requêtes, réessaie dans un moment' : `Erreur API (${r.status})`);
+  if (!r.ok) throw new Error(r.status === 429 ? tr('Trop de requêtes, réessaie dans un moment') : tr('Erreur API ({status})', { status: r.status }));
   return r.json();
 }
 
@@ -61,10 +61,10 @@ function accountId(input) {
 
 function ago(sec) {
   const s = Math.max(0, Math.floor(Date.now() / 1000 - sec));
-  if (s < 3600) return `il y a ${Math.max(1, Math.floor(s / 60))} min`;
-  if (s < 86400) return `il y a ${Math.floor(s / 3600)} h`;
-  if (s < 86400 * 30) return `il y a ${Math.floor(s / 86400)} j`;
-  return `il y a ${Math.floor(s / 86400 / 30)} mois`;
+  if (s < 3600) return tr('il y a {n} min', { n: Math.max(1, Math.floor(s / 60)) });
+  if (s < 86400) return tr('il y a {n} h', { n: Math.floor(s / 3600) });
+  if (s < 86400 * 30) return tr('il y a {n} j', { n: Math.floor(s / 86400) });
+  return tr('il y a {n} mois', { n: Math.floor(s / 86400 / 30) });
 }
 
 function toast(msg) {
@@ -76,10 +76,10 @@ function toast(msg) {
 }
 
 function saveConfig() {
-  T.core.invoke('save_config', { data: JSON.stringify(S.cfg) }).catch((e) => toast(`Sauvegarde impossible : ${e}`));
+  T.core.invoke('save_config', { data: JSON.stringify(S.cfg) }).catch((e) => toast(tr('Sauvegarde impossible : {e}', { e })));
 }
 
-const spinner = (label = 'Chargement…') => `<div class="center"><div class="spinner"></div>${esc(label)}</div>`;
+const spinner = (label = tr('Chargement…')) => `<div class="center"><div class="spinner"></div>${esc(label)}</div>`;
 const heroImg = (id) => S.heroById[id]?.images?.icon_image_small_webp || '';
 const myId = () => accountId(S.cfg.steamId);
 
@@ -87,7 +87,7 @@ function itemTile(id, small = false) {
   const it = S.items[id];
   if (!it) return '';
   const img = it.shop_image_webp || it.image_webp || it.image || '';
-  const cost = it.cost ? `<span>${it.cost.toLocaleString('fr-FR')} âmes</span>` : '';
+  const cost = it.cost ? `<span>${tr('{n} âmes', { n: num(it.cost) })}</span>` : '';
   return `<div class="item ${esc(it.item_slot_type || '')} ${small ? 'sm' : ''}">
     <img loading="lazy" src="${esc(img)}" alt="">
     ${it.item_tier ? `<span class="tier">${TIERS[it.item_tier] || it.item_tier}</span>` : ''}
@@ -112,9 +112,9 @@ async function checkUpdate() {
     S.updateCheck = update ? { state: 'available', version: update.version, at: Date.now() } : { state: 'uptodate', at: Date.now() };
     if (update) {
       const bar = document.getElementById('update-bar');
-      bar.innerHTML = `<span>Nouvelle version <b>${esc(update.version)}</b> disponible</span>
-        <button class="btn primary sm" data-action="do-update">Mettre à jour</button>
-        <button class="btn ghost sm" data-action="skip-update">Plus tard</button>`;
+      bar.innerHTML = `<span>${tr('Nouvelle version {v} disponible', { v: `<b>${esc(update.version)}</b>` })}</span>
+        <button class="btn primary sm" data-action="do-update">${tr('Mettre à jour')}</button>
+        <button class="btn ghost sm" data-action="skip-update">${tr('Plus tard')}</button>`;
       bar.hidden = false;
     }
   } catch (e) {
@@ -126,25 +126,25 @@ async function checkUpdate() {
 
 function updateStatusHtml() {
   const u = S.updateCheck;
-  const at = u?.at ? ` <span class="muted">(vérifié à ${new Date(u.at).toLocaleTimeString('fr-FR')})</span>` : '';
-  if (!u || u.state === 'checking') return '<span class="muted">Vérification…</span>';
-  if (u.state === 'uptodate') return `<span class="win">✓ Tu as la dernière version</span>${at}`;
+  const at = u?.at ? ` <span class="muted">${tr('(vérifié à {time})', { time: new Date(u.at).toLocaleTimeString(LOCALE()) })}</span>` : '';
+  if (!u || u.state === 'checking') return `<span class="muted">${tr('Vérification…')}</span>`;
+  if (u.state === 'uptodate') return `<span class="win">${tr('✓ Tu as la dernière version')}</span>${at}`;
   if (u.state === 'available') {
-    return `<span class="gold">Nouvelle version <b>${esc(u.version)}</b> disponible</span>${at}
-      <button class="btn primary sm" data-action="do-update">Mettre à jour</button>`;
+    return `<span class="gold">${tr('Nouvelle version {v} disponible', { v: `<b>${esc(u.version)}</b>` })}</span>${at}
+      <button class="btn primary sm" data-action="do-update">${tr('Mettre à jour')}</button>`;
   }
-  return `<span class="loss">Impossible de vérifier (connexion ?)</span>${at}`;
+  return `<span class="loss">${tr('Impossible de vérifier (connexion ?)')}</span>${at}`;
 }
 
 async function installUpdate() {
   const bar = document.getElementById('update-bar');
-  bar.innerHTML = '<span>Téléchargement de la mise à jour…</span><div class="spinner"></div>';
+  bar.innerHTML = `<span>${tr('Téléchargement de la mise à jour…')}</span><div class="spinner"></div>`;
   try {
     await S.update.downloadAndInstall();
     await T.process.relaunch(); // on Windows the installer usually closes and restarts the app itself
   } catch (e) {
-    bar.innerHTML = `<span class="loss">Échec de la mise à jour : ${esc(String(e))}</span>
-      <button class="btn ghost sm" data-action="skip-update">Fermer</button>`;
+    bar.innerHTML = `<span class="loss">${tr('Échec de la mise à jour : {e}', { e: esc(String(e)) })}</span>
+      <button class="btn ghost sm" data-action="skip-update">${tr('Fermer')}</button>`;
   }
 }
 
@@ -160,13 +160,16 @@ async function boot() {
   } catch (e) {
     console.warn('config', e);
   }
+  applyStaticTexts();
   render(true);
 
   const since = Math.floor(Date.now() / 1000) - 14 * 86400;
+  // game texts (item names, hero descriptions, ranks) in the app's language
+  const gameLang = LANG() === 'fr' ? 'french' : 'english';
   const [heroes, items, ranks, stats] = await Promise.allSettled([
-    api('/assets/heroes?only_active=true'),
-    api('/assets/items'),
-    api('/assets/ranks'),
+    api(`/assets/heroes?only_active=true&language=${gameLang}`),
+    api(`/assets/items?language=${gameLang}`),
+    api(`/assets/ranks?language=${gameLang}`),
     api(`/analytics/hero-stats?min_unix_timestamp=${since}`),
   ]);
   if (heroes.status === 'fulfilled') {
@@ -185,12 +188,12 @@ async function boot() {
     const games = Object.values(agg).reduce((t, a) => t + a.matches, 0) / 12; // 12 heroes per match
     for (const [id, a] of Object.entries(agg)) S.heroStats[id] = { wr: pct(a.wins, a.matches), pick: pct(a.matches, games) };
   }
-  if ([heroes, items].some((r) => r.status === 'rejected')) toast("Impossible de joindre l'API Deadlock");
+  if ([heroes, items].some((r) => r.status === 'rejected')) toast(tr("Impossible de joindre l'API Deadlock"));
 
   if (myId() != null) {
     loadProfile(myId());
     ingestSteamCache()
-      .then((n) => n && toast(`${n} partie(s) envoyée(s) à l'API : elles apparaîtront d'ici quelques minutes`))
+      .then((n) => n && toast(tr("{n} partie(s) envoyée(s) à l'API : elles apparaîtront d'ici quelques minutes", { n })))
       .catch((e) => console.warn('ingest', e));
   } else render();
   // live view: every minute, or every 20 s while waiting for the broadcast of a detected match
@@ -221,7 +224,7 @@ async function ingestSteamCache() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(fresh.slice(i, i + 1000)),
     });
-    if (!r.ok) throw new Error(`Envoi refusé par l'API (${r.status})`);
+    if (!r.ok) throw new Error(tr("Envoi refusé par l'API ({status})", { status: r.status }));
   }
   fresh.forEach((s) => sent.add(key(s)));
   try {
@@ -234,7 +237,7 @@ async function syncAndRefresh() {
   checkCurrentMatch();
   try {
     const n = await ingestSteamCache();
-    if (n) toast(`${n} partie(s) envoyée(s) à l'API : elles apparaîtront d'ici quelques minutes`);
+    if (n) toast(tr("{n} partie(s) envoyée(s) à l'API : elles apparaîtront d'ici quelques minutes", { n }));
   } catch (e) {
     toast(e.message);
   }
@@ -246,7 +249,7 @@ async function freshHistory(id) {
   try {
     return await api(`/players/${id}/match-history?force_refetch=true`);
   } catch (e) {
-    toast('Mise à jour depuis Steam limitée à 1 fois par heure : historique en cache affiché');
+    toast(tr('Mise à jour depuis Steam limitée à 1 fois par heure : historique en cache affiché'));
     return api(`/players/${id}/match-history`);
   }
 }
@@ -329,8 +332,8 @@ function render(animate = false) {
   }
   if (S.view === 'profile' && S.viewing == null && !S.editingId && S.currentMatch) {
     html = `<div class="card ornate live-banner"><span class="dot-live"></span>
-      <div><b>Tu es en partie</b><small>Partie n° <span class="mono">${S.currentMatch}</span></small></div>
-      <button class="btn primary sm" data-view="live">Voir les équipes</button></div>` + html;
+      <div><b>${tr('Tu es en partie')}</b><small>${tr('Partie n° {id}', { id: `<span class="mono">${S.currentMatch}</span>` })}</small></div>
+      <button class="btn primary sm" data-view="live">${tr('Voir les équipes')}</button></div>` + html;
   }
   view.innerHTML = `<div class="${animate ? 'fade' : ''}">${html}</div>`;
   if (animate) view.scrollTop = 0;
@@ -340,57 +343,58 @@ function render(animate = false) {
       || (S.view === 'match' && b.dataset.view === 'profile')));
 }
 
-const DISCLAIMER = 'Application de fan non officielle, non affiliée à Valve Corporation. Deadlock et ses visuels sont la propriété de Valve.';
-const SHARE_TEXT = `Envoie à deadlock-api.com l'identifiant et le code d'accès des parties trouvées dans le cache de Steam
-  sur ce PC (les parties que tu ouvres dans l'historique du jeu). Rien d'autre n'est envoyé : ni ton compte, ni ton pseudo.
-  L'API récupère alors ces parties plus vite ; elles deviennent consultables publiquement comme toutes les parties de l'API.`;
+const DISCLAIMER = () => tr('Application de fan non officielle, non affiliée à Valve Corporation. Deadlock et ses visuels sont la propriété de Valve.');
+const SHARE_TEXT = () => tr("Envoie à deadlock-api.com l'identifiant et le code d'accès des parties trouvées dans le cache de Steam sur ce PC (les parties que tu ouvres dans l'historique du jeu). Rien d'autre n'est envoyé : ni ton compte, ni ton pseudo. L'API récupère alors ces parties plus vite ; elles deviennent consultables publiquement comme toutes les parties de l'API.");
 
 function shareBanner() {
   return `<div class="card ornate share-banner">
-    <div><b>Partager tes parties avec deadlock-api.com ?</b><p>${SHARE_TEXT}</p></div>
-    <div class="share-actions"><button class="btn primary sm" data-action="share-yes">Partager</button>
-      <button class="btn ghost sm" data-action="share-no">Non merci</button></div>
+    <div><b>${tr('Partager tes parties avec deadlock-api.com ?')}</b><p>${SHARE_TEXT()}</p></div>
+    <div class="share-actions"><button class="btn primary sm" data-action="share-yes">${tr('Partager')}</button>
+      <button class="btn ghost sm" data-action="share-no">${tr('Non merci')}</button></div>
   </div>`;
 }
 
 function renderSettings() {
   const id = myId();
-  return `<h1 class="page">Réglages</h1>
-    <p class="sub">Compte, partage de données et informations sur l'app.</p>
-    <div class="section-title">Partage des parties</div>
+  const langSeg = [['fr', 'Français'], ['en', 'English']]
+    .map(([k, l]) => `<button data-lang="${k}" class="${LANG() === k ? 'on' : ''}">${l}</button>`)
+    .join('');
+  return `<h1 class="page">${tr('Réglages')}</h1>
+    <p class="sub">${tr("Langue, compte, partage de données et informations sur l'app.")}</p>
+    <div class="section-title">${tr('Langue')}</div>
+    <div class="card setting"><div class="seg">${langSeg}</div>
+      <p class="muted">${tr('Les noms des objets et les descriptions des héros suivent aussi la langue choisie.')}</p></div>
+    <div class="section-title">${tr('Partage des parties')}</div>
     <div class="card setting"><label class="toggle"><input type="checkbox" id="share-toggle" ${S.cfg.shareMatches === true ? 'checked' : ''}>
-      Partager mes parties avec deadlock-api.com</label><p class="muted">${SHARE_TEXT}</p></div>
-    <div class="section-title">Compte Steam</div>
-    <div class="card setting"><div>${id != null ? `Compte connecté : <span class="mono">${id}</span>` : 'Aucun compte connecté.'}</div>
-      <button class="btn sm" data-action="settings-change-id">Changer de compte</button></div>
-    <div class="section-title">Partie en direct</div>
-    <div class="card setting"><p class="muted">Pour voir ta partie en cours, ajoute <b>-condebug</b> aux options de lancement de Deadlock
-      (Steam → clic droit sur Deadlock → Propriétés → Options de lancement). L'app lit alors l'identifiant de la partie dans le journal
-      du jeu, puis sa diffusion spectateur officielle. Elle n'affiche que ce que montre le tableau des scores et ne touche jamais au jeu.</p></div>
-    <div class="section-title">Version</div>
+      ${tr('Partager mes parties avec deadlock-api.com')}</label><p class="muted">${SHARE_TEXT()}</p></div>
+    <div class="section-title">${tr('Compte Steam')}</div>
+    <div class="card setting"><div>${id != null ? tr('Compte connecté : {id}', { id: `<span class="mono">${id}</span>` }) : tr('Aucun compte connecté.')}</div>
+      <button class="btn sm" data-action="settings-change-id">${tr('Changer de compte')}</button></div>
+    <div class="section-title">${tr('Partie en direct')}</div>
+    <div class="card setting"><p class="muted">${tr("Pour voir ta partie en cours, ajoute {opt} aux options de lancement de Deadlock (Steam → clic droit sur Deadlock → Propriétés → Options de lancement). L'app lit alors l'identifiant de la partie dans le journal du jeu, puis sa diffusion spectateur officielle. Elle n'affiche que ce que montre le tableau des scores et ne touche jamais au jeu.", { opt: '<b>-condebug</b>' })}</p></div>
+    <div class="section-title">${tr('Version')}</div>
     <div class="card setting version-card">
-      <div class="version-row"><span class="muted">Version installée</span><span class="version-num mono">${esc(S.version || '…')}</span></div>
+      <div class="version-row"><span class="muted">${tr('Version installée')}</span><span class="version-num mono">${esc(S.version || '…')}</span></div>
       <div class="version-row">${updateStatusHtml()}</div>
-      <button class="btn sm" data-action="check-update" ${S.updateCheck?.state === 'checking' ? 'disabled' : ''}>Vérifier les mises à jour</button>
+      <button class="btn sm" data-action="check-update" ${S.updateCheck?.state === 'checking' ? 'disabled' : ''}>${tr('Vérifier les mises à jour')}</button>
     </div>
-    <div class="section-title">À propos</div>
-    <div class="card setting about"><p>${DISCLAIMER}</p>
-      <p class="muted">Données : <b>deadlock-api.com</b> (API communautaire publique). Décodage des diffusions : <b>Haste</b> de blukai (licence MIT).
-      Images des héros et objets servies par deadlock-api.com.</p></div>`;
+    <div class="section-title">${tr('À propos')}</div>
+    <div class="card setting about"><p>${DISCLAIMER()}</p>
+      <p class="muted">${tr('Données : {api} (API communautaire publique). Décodage des diffusions : {haste} de blukai (licence MIT). Images des héros et objets servies par deadlock-api.com.', { api: '<b>deadlock-api.com</b>', haste: '<b>Haste</b>' })}</p></div>`;
 }
 
 function onboarding() {
   return `<div class="card ornate onboard">
     <div class="crest"><svg viewBox="0 0 24 24"><path d="M12 1l11 11-11 11L1 12z"/><path d="M12 5.5l6.5 6.5-6.5 6.5L5.5 12z"/><path d="M12 9v6M9 12h6"/></svg></div>
-    <h2>Connecte ton profil</h2>
-    <p>Retrouve ton rang, tes stats, tes coéquipiers et ton historique de matchs Deadlock.</p>
+    <h2>${tr('Connecte ton profil')}</h2>
+    <p>${tr('Retrouve ton rang, tes stats, tes coéquipiers et ton historique de matchs Deadlock.')}</p>
     <form data-form="steam">
-      <input class="input" name="sid" autofocus placeholder="Code ami Steam, SteamID64 ou lien de profil" value="${esc(S.cfg.steamId)}">
-      <button class="btn primary">Charger</button>
+      <input class="input" name="sid" autofocus placeholder="${tr('Code ami Steam, SteamID64 ou lien de profil')}" value="${esc(S.cfg.steamId)}">
+      <button class="btn primary">${tr('Charger')}</button>
     </form>
-    <div class="hint">Code ami : Steam → Amis → Ajouter un ami. Ton profil Steam doit être public.</div>
-    <div class="hint">${DISCLAIMER}</div>
-    ${S.editingId && myId() != null ? '<button class="btn ghost sm" style="margin-top:14px" data-action="cancel-id">Annuler</button>' : ''}
+    <div class="hint">${tr('Code ami : Steam → Amis → Ajouter un ami. Ton profil Steam doit être public.')}</div>
+    <div class="hint">${DISCLAIMER()}</div>
+    ${S.editingId && myId() != null ? `<button class="btn ghost sm" style="margin-top:14px" data-action="cancel-id">${tr('Annuler')}</button>` : ''}
   </div>`;
 }
 
@@ -399,13 +403,13 @@ function renderProfile() {
   if ((mine == null && S.viewing == null) || S.editingId) return onboarding();
   const id = S.viewing ?? mine;
   const isMine = id === mine;
-  const back = isMine ? '' : `<button class="back" data-action="back-profile">← ${S.stack.length ? 'Retour' : 'Mon profil'}</button>`;
+  const back = isMine ? '' : `<button class="back" data-action="back-profile">← ${S.stack.length ? tr('Retour') : tr('Mon profil')}</button>`;
   const p = S.profiles[id];
-  if (!p || (p.loading && !p.matches)) return back + spinner('Chargement du profil…');
+  if (!p || (p.loading && !p.matches)) return back + spinner(tr('Chargement du profil…'));
   if (p.err) {
-    return `${back}<h1 class="page">Profil</h1><div class="error">${esc(p.err)}</div>
-      <div style="margin-top:14px;display:flex;gap:8px"><button class="btn" data-action="refresh">Réessayer</button>
-      ${isMine ? '<button class="btn ghost" data-action="change-id">Changer de compte</button>' : ''}</div>`;
+    return `${back}<h1 class="page">${tr('Profil')}</h1><div class="error">${esc(p.err)}</div>
+      <div style="margin-top:14px;display:flex;gap:8px"><button class="btn" data-action="refresh">${tr('Réessayer')}</button>
+      ${isMine ? `<button class="btn ghost" data-action="change-id">${tr('Changer de compte')}</button>` : ''}</div>`;
   }
 
   const m = p.matches;
@@ -414,8 +418,8 @@ function renderProfile() {
   const tier = r && r.rank > 0 ? S.ranks.find((t) => t.tier === r.rank) : null;
   const rankImg = tier ? tier.images?.[`large_subrank${r.subrank}_webp`] || tier.images?.large_webp : '';
   const rankHtml = tier
-    ? `<div class="rank"><div><div class="rank-name">${esc(tier.name)} ${r.subrank || ''}</div><small>Rang actuel</small></div><img src="${esc(rankImg)}" alt=""></div>`
-    : `<div class="rank"><div><div class="rank-name">Non classé</div><small>Pas de rang récent</small></div></div>`;
+    ? `<div class="rank"><div><div class="rank-name">${esc(tier.name)} ${r.subrank || ''}</div><small>${tr('Rang actuel')}</small></div><img src="${esc(rankImg)}" alt=""></div>`
+    : `<div class="rank"><div><div class="rank-name">${tr('Non classé')}</div><small>${tr('Pas de rang récent')}</small></div></div>`;
 
   // backdrop: art of the player's most played hero
   const counts = {};
@@ -426,22 +430,22 @@ function renderProfile() {
     ${favBg ? `<img class="head-bg" src="${esc(favBg)}" alt="">` : ''}
     ${avatarHtml(st, 'avatar')}
     <div>
-      <div class="profile-name">${esc(st?.personaname || `Joueur ${id}`)}</div>
-      <div class="profile-meta"><span>${m.length} matchs enregistrés</span>${st?.countrycode ? `<span>${esc(st.countrycode)}</span>` : ''}<span class="mono">ID ${id}</span></div>
+      <div class="profile-name">${esc(st?.personaname || tr('Joueur {id}', { id }))}</div>
+      <div class="profile-meta"><span>${tr('{n} matchs enregistrés', { n: m.length })}</span>${st?.countrycode ? `<span>${esc(st.countrycode)}</span>` : ''}<span class="mono">ID ${id}</span></div>
     </div>
     ${rankHtml}
     <div class="head-actions">
-      <button class="icon-btn" data-action="analyze" title="Analyser ses stats"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg></button>
-      <button class="icon-btn" data-action="refresh" title="Actualiser"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg></button>
-      ${isMine ? '<button class="icon-btn" data-action="change-id" title="Changer de compte"><svg viewBox="0 0 24 24"><path d="M16 3h5v5M21 3l-7 7M8 21H3v-5M3 21l7-7"/></svg></button>' : ''}
+      <button class="icon-btn" data-action="analyze" title="${tr('Analyser ses stats')}"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg></button>
+      <button class="icon-btn" data-action="refresh" title="${tr('Actualiser')}"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg></button>
+      ${isMine ? `<button class="icon-btn" data-action="change-id" title="${tr('Changer de compte')}"><svg viewBox="0 0 24 24"><path d="M16 3h5v5M21 3l-7 7M8 21H3v-5M3 21l7-7"/></svg></button>` : ''}
     </div>
   </div>`;
-  if (p.loading) return head + spinner('Actualisation…');
-  if (!m.length) return head + '<div class="center">Aucun match trouvé. Le profil Steam est peut-être privé.</div>';
+  if (p.loading) return head + spinner(tr('Actualisation…'));
+  if (!m.length) return head + `<div class="center">${tr('Aucun match trouvé. Le profil Steam est peut-être privé.')}</div>`;
 
   // stats on normal matches only: Street Brawl (game_mode 4) gives ~3x the souls/min and skews everything
   const nm = m.filter((x) => x.game_mode === 1);
-  if (!nm.length) return head + '<div class="center">Aucune partie normale trouvée.</div>';
+  if (!nm.length) return head + `<div class="center">${tr('Aucune partie normale trouvée.')}</div>`;
   const n = nm.length;
   const wins = nm.filter(isWin).length;
   const sum = (f) => nm.reduce((t, x) => t + f(x), 0);
@@ -449,11 +453,11 @@ function renderProfile() {
   const spm = sum((x) => x.net_worth) / Math.max(1, sum((x) => x.match_duration_s) / 60);
   const recent = nm.slice(0, 20);
   const tiles = `<div class="tiles">
-    <div class="card ornate tile"><div class="label">Matchs</div><div class="value">${n}</div></div>
-    <div class="card ornate tile"><div class="label">Winrate</div><div class="value ${wrClass(pct(wins, n))}">${pct(wins, n).toFixed(1)}%</div><small class="muted">${wins}V · ${n - wins}D</small></div>
+    <div class="card ornate tile"><div class="label">${tr('Matchs')}</div><div class="value">${n}</div></div>
+    <div class="card ornate tile"><div class="label">Winrate</div><div class="value ${wrClass(pct(wins, n))}">${pct(wins, n).toFixed(1)}%</div><small class="muted">${tr('{w}V · {l}D', { w: wins, l: n - wins })}</small></div>
     <div class="card ornate tile"><div class="label">KDA</div><div class="value">${((k + a) / Math.max(1, d)).toFixed(2)}</div><small class="muted">${(k / n).toFixed(1)} / ${(d / n).toFixed(1)} / ${(a / n).toFixed(1)}</small></div>
-    <div class="card ornate tile"><div class="label">Âmes / min</div><div class="value">${Math.round(spm).toLocaleString('fr-FR')}</div></div>
-    <div class="card ornate tile"><div class="label">Forme · ${recent.length} derniers</div>
+    <div class="card ornate tile"><div class="label">${tr('Âmes / min')}</div><div class="value">${num(Math.round(spm))}</div></div>
+    <div class="card ornate tile"><div class="label">${tr('Forme · {n} derniers', { n: recent.length })}</div>
       <div class="value">${pct(recent.filter(isWin).length, recent.length).toFixed(0)}%</div>
       <div class="form-dots">${recent.slice().reverse().map((x) => `<i class="${isWin(x) ? 'w' : ''}"></i>`).join('')}</div></div>
   </div>`;
@@ -465,13 +469,13 @@ function renderProfile() {
     e.w += isWin(x);
   }
   const top = Object.entries(per).sort((x, y) => y[1].g - x[1].g).slice(0, 8);
-  const topHtml = `<div class="section-title">Héros les plus joués</div><div class="top-heroes">${top
+  const topHtml = `<div class="section-title">${tr('Héros les plus joués')}</div><div class="top-heroes">${top
     .map(([hid, e]) => {
       const wr = pct(e.w, e.g);
       return `<div class="card top-hero" data-hero="${hid}">
         <img loading="lazy" src="${esc(heroImg(hid))}" alt="">
         <div><div class="n">${esc(S.heroById[hid]?.name || `#${hid}`)}</div>
-          <div class="s">${e.g} matchs · <span class="${wrClass(wr)}">${wr.toFixed(0)}%</span></div>
+          <div class="s">${tr('{n} matchs', { n: e.g })} · <span class="${wrClass(wr)}">${wr.toFixed(0)}%</span></div>
           <div class="bar"><i style="width:${wr}%"></i></div></div>
       </div>`;
     })
@@ -482,37 +486,37 @@ function renderProfile() {
         .map((mt) => {
           const s = p.names[mt.mate_id];
           const wr = pct(mt.wins, mt.matches_played);
-          return `<div class="card top-hero" data-player="${mt.mate_id}" title="Voir le profil">
+          return `<div class="card top-hero" data-player="${mt.mate_id}" title="${tr('Voir le profil')}">
             ${avatarHtml(s, 'mate-av')}
-            <div><div class="n">${esc(s?.personaname || `Joueur ${mt.mate_id}`)}</div>
-              <div class="s">${mt.matches_played} matchs ·<span class="${wrClass(wr)}">${wr.toFixed(0)}%</span></div>
+            <div><div class="n">${esc(s?.personaname || tr('Joueur {id}', { id: mt.mate_id }))}</div>
+              <div class="s">${tr('{n} matchs', { n: mt.matches_played })} · <span class="${wrClass(wr)}">${wr.toFixed(0)}%</span></div>
               <div class="bar"><i style="width:${wr}%"></i></div></div>
           </div>`;
         })
         .join('')}</div>`
-    : `<div class="muted">${p.matesErr ? esc(p.matesErr) : 'Aucun coéquipier régulier trouvé (au moins 3 matchs dans la même équipe).'}</div>`;
+    : `<div class="muted">${p.matesErr ? esc(p.matesErr) : tr('Aucun coéquipier régulier trouvé (au moins 3 matchs dans la même équipe).')}</div>`;
 
   const shown = m.slice(0, S.showAll ? 200 : 25);
   const rows = shown
     .map((x) => {
       const w = isWin(x);
-      return `<div class="match ${w ? '' : 'l'}" data-match="${x.match_id}" title="Voir le détail">
+      return `<div class="match ${w ? '' : 'l'}" data-match="${x.match_id}" title="${tr('Voir le détail')}">
         <img loading="lazy" src="${esc(heroImg(x.hero_id))}" alt="">
         <div><div class="hn">${esc(S.heroById[x.hero_id]?.name || `#${x.hero_id}`)}</div><small class="muted">${ago(x.start_time)}</small></div>
-        <div class="res ${w ? 'win' : 'loss'}">${w ? 'Victoire' : 'Défaite'}${x.game_mode === 4 ? '<span class="mode-tag">Street Brawl</span>' : ''}</div>
+        <div class="res ${w ? 'win' : 'loss'}">${w ? tr('Victoire') : tr('Défaite')}${x.game_mode === 4 ? '<span class="mode-tag">Street Brawl</span>' : ''}</div>
         <div class="kda">${x.player_kills} / <b>${x.player_deaths}</b> / ${x.player_assists}</div>
-        <div class="cell mono">${(x.net_worth / 1000).toFixed(1)}k<small>âmes</small></div>
-        <div class="cell mono">${fmt(x.match_duration_s)}<small>durée</small></div>
+        <div class="cell mono">${(x.net_worth / 1000).toFixed(1)}k<small>${tr('âmes')}</small></div>
+        <div class="cell mono">${fmt(x.match_duration_s)}<small>${tr('durée')}</small></div>
         <div class="cell mono">${x.last_hits}<small>last hits</small></div>
         <div class="cell mono">${x.denies}<small>denies</small></div>
       </div>`;
     })
     .join('');
-  const more = m.length > 25 ? `<button class="btn sm more" data-action="more">${S.showAll ? 'Voir moins' : `Voir plus (${Math.min(200, m.length)})`}</button>` : '';
+  const more = m.length > 25 ? `<button class="btn sm more" data-action="more">${S.showAll ? tr('Voir moins') : tr('Voir plus ({n})', { n: Math.min(200, m.length) })}</button>` : '';
   return head + tiles
-    + `<div class="section-title">Joue le plus avec</div>${mates}`
+    + `<div class="section-title">${tr('Joue le plus avec')}</div>${mates}`
     + topHtml
-    + `<div class="section-title">Derniers matchs</div><div class="matches">${rows}</div>${more}`;
+    + `<div class="section-title">${tr('Derniers matchs')}</div><div class="matches">${rows}</div>${more}`;
 }
 
 const TEAMS = ['Amber Hand', 'Sapphire Flame'];
@@ -520,8 +524,8 @@ const TEAMS = ['Amber Hand', 'Sapphire Flame'];
 // Teams seen from the reference player's side (allies first); the game's names when they're not in it.
 function sides(ref) {
   const info = (t) => {
-    if (ref == null) return { name: TEAMS[t] || `Équipe ${t + 1}`, cls: `t${t}` };
-    return t === ref ? { name: 'Alliés', cls: 'ally' } : { name: 'Ennemis', cls: 'enemy' };
+    if (ref == null) return { name: TEAMS[t] || tr('Équipe {n}', { n: t + 1 }), cls: `t${t}` };
+    return t === ref ? { name: tr('Alliés'), cls: 'ally' } : { name: tr('Ennemis'), cls: 'enemy' };
   };
   return { order: ref === 1 ? [1, 0] : [0, 1], info };
 }
@@ -536,14 +540,14 @@ function badgeHtml(badge) {
 }
 
 function renderMatch() {
-  const back = '<button class="back" data-action="back-match">← Retour au profil</button>';
+  const back = `<button class="back" data-action="back-match">← ${tr('Retour au profil')}</button>`;
   const c = S.matchCache[S.match];
-  if (!c || c.loading) return back + spinner('Chargement de la partie…');
+  if (!c || c.loading) return back + spinner(tr('Chargement de la partie…'));
   if (c.err) return `${back}<div class="error">${esc(c.err)}</div>`;
   const mi = c.info;
   const me = mi.players.find((p) => p.account_id === S.matchFor);
   const won = me ? me.team === mi.winning_team : null;
-  const title = won == null ? `Partie ${mi.match_id}` : won ? 'Victoire' : 'Défaite';
+  const title = won == null ? tr('Partie {id}', { id: mi.match_id }) : won ? tr('Victoire') : tr('Défaite');
   const maxDmg = Math.max(1, ...mi.players.map((p) => p.stats?.at(-1)?.player_damage || 0));
   const sd = sides(me?.team ?? null);
 
@@ -555,7 +559,7 @@ function renderMatch() {
       .map((p) => {
         const st = p.stats?.at(-1) || {};
         const s = c.names[p.account_id];
-        const name = p.account_id ? s?.personaname || `Joueur ${p.account_id}` : 'Anonyme';
+        const name = p.account_id ? s?.personaname || tr('Joueur {id}', { id: p.account_id }) : tr('Anonyme');
         // final build: shop items still owned at the end
         const items = (p.items || [])
           .filter((i) => !i.sold_time_s && S.items[i.item_id]?.type === 'upgrade')
@@ -566,12 +570,12 @@ function renderMatch() {
           <div class="mp-name">${p.account_id
             ? `<button class="link" data-player="${p.account_id}">${esc(name)}</button>`
             : `<span class="muted">${name}</span>`}
-            <small>${esc(S.heroById[p.hero_id]?.name || '')} · niv. ${p.level}</small></div>
+            <small>${esc(S.heroById[p.hero_id]?.name || '')} · ${tr('niv. {n}', { n: p.level })}</small></div>
           <div class="kda">${p.kills} / <b>${p.deaths}</b> / ${p.assists}</div>
-          <div class="cell mono">${(p.net_worth / 1000).toFixed(1)}k<small>âmes</small></div>
-          <div class="cell mono">${((st.player_damage || 0) / 1000).toFixed(1)}k<small>dégâts</small>
+          <div class="cell mono">${(p.net_worth / 1000).toFixed(1)}k<small>${tr('âmes')}</small></div>
+          <div class="cell mono">${((st.player_damage || 0) / 1000).toFixed(1)}k<small>${tr('dégâts')}</small>
             <div class="bar dmg"><i style="width:${pct(st.player_damage || 0, maxDmg)}%"></i></div></div>
-          <div class="cell mono">${((st.player_healing || 0) / 1000).toFixed(1)}k<small>soins</small></div>
+          <div class="cell mono">${((st.player_healing || 0) / 1000).toFixed(1)}k<small>${tr('soins')}</small></div>
           <div class="cell mono">${p.last_hits}<small>LH / ${p.denies} den.</small></div>
           <div class="mp-items">${items}</div>
         </div>`;
@@ -580,8 +584,8 @@ function renderMatch() {
     const win = t === mi.winning_team;
     return `<div class="team ${sd.info(t).cls} ${win ? 'w' : 'l'}">
       <div class="team-head"><span class="team-name">${sd.info(t).name}</span>
-        <span class="res ${win ? 'win' : 'loss'}">${win ? 'Victoire' : 'Défaite'}</span>
-        <span class="muted mono">${k} kills · ${(souls / 1000).toFixed(1)}k âmes</span>
+        <span class="res ${win ? 'win' : 'loss'}">${win ? tr('Victoire') : tr('Défaite')}</span>
+        <span class="muted mono">${k} kills · ${(souls / 1000).toFixed(1)}k ${tr('âmes')}</span>
         ${badgeHtml(mi[`average_badge_team${t}`])}</div>
       ${rows}</div>`;
   };
@@ -664,39 +668,36 @@ function renderLive() {
   if (myId() == null) return onboarding();
   if (!S.live) loadLive();
   const L = S.live || { loading: true };
-  const head = `<h1 class="page">En direct</h1>
-    <p class="sub">${S.liveDemo ? 'La partie la plus regardée en ce moment.' : 'Ta partie en cours, avec les rangs de chaque joueur.'}</p>
+  const head = `<h1 class="page">${tr('En direct')}</h1>
+    <p class="sub">${S.liveDemo ? tr('La partie la plus regardée en ce moment.') : tr('Ta partie en cours, avec les rangs de chaque joueur.')}</p>
     <div class="live-actions">
-      <button class="btn sm" data-action="live-refresh">Actualiser</button>
-      <button class="btn sm ghost" data-action="live-demo">${S.liveDemo ? '← Revenir à ma partie' : 'Voir une partie du top en direct'}</button>
-      ${L.at ? `<span class="muted">Mis à jour à ${new Date(L.at).toLocaleTimeString('fr-FR')} · actualisation auto ${L.pending ? 'toutes les 20 s' : 'toutes les minutes'}</span>` : ''}
+      <button class="btn sm" data-action="live-refresh">${tr('Actualiser')}</button>
+      <button class="btn sm ghost" data-action="live-demo">${S.liveDemo ? `← ${tr('Revenir à ma partie')}` : tr('Voir une partie du top en direct')}</button>
+      ${L.at ? `<span class="muted">${tr('Mis à jour à {time}', { time: new Date(L.at).toLocaleTimeString(LOCALE()) })} · ${L.pending ? tr('actualisation auto toutes les 20 s') : tr('actualisation auto toutes les minutes')}</span>` : ''}
     </div>`;
-  if (L.loading && !L.match && !L.pending) return head + spinner('Recherche de la partie…');
+  if (L.loading && !L.match && !L.pending) return head + spinner(tr('Recherche de la partie…'));
   if (L.err) return head + `<div class="error">${esc(L.err)}</div>`;
   const m = L.match;
   if (!m && L.pending) {
     const waited = S.liveUrl?.mid === L.pending ? Date.now() - S.liveUrl.since : 0;
+    const idHtml = `<span class="mono">${L.pending}</span>`;
     // after 3 min without a broadcast, say so plainly instead of "starting…" forever
     if (waited > 3 * 60000) {
       return head + `<div class="card ornate onboard live-empty">
-        <h2>Diffusion indisponible</h2>
-        <p>Partie n° <span class="mono">${L.pending}</span> détectée, mais Valve ne diffuse pas cette partie en mode spectateur
-        (ça arrive selon le type de partie ou la charge des serveurs), donc les équipes ne peuvent pas être affichées.
-        L'app continue de réessayer en arrière-plan et redemande la diffusion toutes les 10 minutes.</p>
+        <h2>${tr('Diffusion indisponible')}</h2>
+        <p>${tr("Partie n° {id} détectée, mais Valve ne diffuse pas cette partie en mode spectateur (ça arrive selon le type de partie ou la charge des serveurs), donc les équipes ne peuvent pas être affichées. L'app continue de réessayer en arrière-plan et redemande la diffusion toutes les 10 minutes.", { id: idHtml })}</p>
       </div>`;
     }
     return head + `<div class="card ornate onboard live-empty">
       <div class="spinner" style="margin:0 auto 18px"></div>
-      <h2>Partie détectée</h2>
-      <p>Partie n° <span class="mono">${L.pending}</span>. La diffusion officielle démarre généralement une à deux minutes
-      après le début (choix des héros, chargement). Nouvelle tentative automatique toutes les 20 secondes.</p>
+      <h2>${tr('Partie détectée')}</h2>
+      <p>${tr('Partie n° {id}. La diffusion officielle démarre généralement une à deux minutes après le début (choix des héros, chargement). Nouvelle tentative automatique toutes les 20 secondes.', { id: idHtml })}</p>
     </div>`;
   }
   if (!m) {
     return head + `<div class="card ornate onboard live-empty">
-      <h2>Aucune partie en cours trouvée</h2>
-      <p>Pour voir ta partie, ajoute <b>-condebug</b> aux options de lancement de Deadlock (Steam → Propriétés)
-      et rejoins la partie dès le début : l'app y lit l'identifiant de la partie puis sa diffusion spectateur officielle.</p>
+      <h2>${tr('Aucune partie en cours trouvée')}</h2>
+      <p>${tr("Pour voir ta partie, ajoute {opt} aux options de lancement de Deadlock (Steam → Propriétés) et rejoins la partie dès le début : l'app y lit l'identifiant de la partie puis sa diffusion spectateur officielle.", { opt: '<b>-condebug</b>' })}</p>
     </div>`;
   }
   const me = myId();
@@ -708,29 +709,29 @@ function renderLive() {
       .filter((p) => p.team === t)
       .map((p) => {
         const s = L.names[p.account_id];
-        const name = s?.personaname || p.name || (p.account_id ? `Joueur ${p.account_id}` : 'Anonyme');
+        const name = s?.personaname || p.name || (p.account_id ? tr('Joueur {id}', { id: p.account_id }) : tr('Anonyme'));
         const stats = m.scoreboard
-          ? `<div class="lp-stats mono"><span>${p.kills} / <b>${p.deaths}</b> / ${p.assists}</span><span>${(p.net_worth / 1000).toFixed(1)}k</span><span>niv. ${p.level}</span></div>`
+          ? `<div class="lp-stats mono"><span>${p.kills} / <b>${p.deaths}</b> / ${p.assists}</span><span>${(p.net_worth / 1000).toFixed(1)}k</span><span>${tr('niv. {n}', { n: p.level })}</span></div>`
           : '';
         return `<div class="lp ${p.account_id === me ? 'me' : ''}">
           <img class="h" src="${esc(heroImg(p.hero_id))}" alt="" title="${esc(S.heroById[p.hero_id]?.name || '')}">
           <div class="nm">${p.account_id ? `<button class="link" data-player="${p.account_id}">${esc(name)}</button>` : `<span class="muted">${esc(name)}</span>`}
             <small>${esc(S.heroById[p.hero_id]?.name || '')}</small></div>
           ${stats}
-          ${badgeHtml(L.ranks[p.account_id]) || '<span class="badge">Non classé</span>'}
+          ${badgeHtml(L.ranks[p.account_id]) || `<span class="badge">${tr('Non classé')}</span>`}
         </div>`;
       })
       .join('');
     return `<div class="team ${sd.info(t).cls}"><div class="team-head"><span class="team-name">${sd.info(t).name}</span>
-      <span class="muted mono">${(souls[t] / 1000).toFixed(1)}k âmes</span></div>${rows}</div>`;
+      <span class="muted mono">${(souls[t] / 1000).toFixed(1)}k ${tr('âmes')}</span></div>${rows}</div>`;
   };
   return head + `<div class="card ornate live-head">
-      <div><div class="label">Durée</div><div class="value mono">${fmt(m.duration_s || Math.max(0, Math.floor(L.at / 1000) - (m.start_time || 0)))}</div></div>
+      <div><div class="label">${tr('Durée')}</div><div class="value mono">${fmt(m.duration_s || Math.max(0, Math.floor(L.at / 1000) - (m.start_time || 0)))}</div></div>
       ${m.scoreboard
-        ? `<div><div class="label">Source</div><div class="value">Diffusion officielle</div></div><div></div>`
-        : `<div><div class="label">Mode</div><div class="value">${esc(m.match_mode_parsed || '')}</div></div>
-           <div><div class="label">Spectateurs</div><div class="value mono">${m.spectators ?? 0}</div></div>`}
-      <div class="souls"><div class="label">Âmes par équipe</div>
+        ? `<div><div class="label">${tr('Source')}</div><div class="value">${tr('Diffusion officielle')}</div></div><div></div>`
+        : `<div><div class="label">${tr('Mode')}</div><div class="value">${esc(m.match_mode_parsed || '')}</div></div>
+           <div><div class="label">${tr('Spectateurs')}</div><div class="value mono">${m.spectators ?? 0}</div></div>`}
+      <div class="souls"><div class="label">${tr('Âmes par équipe')}</div>
         <div class="souls-bar">${sd.order.map((t) => `<i class="${sd.info(t).cls}" style="width:${pct(souls[t], total)}%"></i>`).join('')}</div>
         <div class="souls-num mono">${sd.order.map((t) => `<span>${sd.info(t).name} ${(souls[t] / 1000).toFixed(1)}k</span>`).join('')}</div></div>
     </div>
@@ -757,7 +758,7 @@ const METRICS = [
   { k: 'boss_damage_per_min', label: 'Dégâts objectifs / min', d: 0, axis: 'Objectifs' },
   { k: 'healing_per_min', label: 'Soins / min', d: 0 },
 ];
-const fmtM = (m, v) => (m.pct ? `${(v * 100).toFixed(1)}%` : v.toLocaleString('fr-FR', { maximumFractionDigits: m.d, minimumFractionDigits: m.d }));
+const fmtM = (m, v) => (m.pct ? `${(v * 100).toFixed(1)}%` : num(v, m.d));
 
 /** Where value v sits (1-99) in a distribution given as API percentiles. */
 function pctOf(dist, v) {
@@ -817,7 +818,7 @@ function radarSvg(axes, refName) {
       return `<circle cx="${x}" cy="${y}" r="4.5" fill="${ME}" stroke="#121814" stroke-width="2"><title>${esc(a.label)} : ${Math.round(a.score)} / 100</title></circle>`;
     })
     .join('');
-  return `<svg class="radar" viewBox="-40 -6 420 356" role="img" aria-label="Profil comparé à ${esc(refName)}">
+  return `<svg class="radar" viewBox="-40 -6 420 356" role="img" aria-label="${tr('Profil comparé à {ref}', { ref: esc(refName) })}">
     ${rings}${spokes}
     <polygon points="${poly(() => R * 0.5)}" fill="${REF}" fill-opacity=".10"/>
     <polygon points="${poly((i) => (R * axes[i].score) / 100)}" fill="${ME}" fill-opacity=".22" stroke="${ME}" stroke-width="2" stroke-linejoin="round"/>
@@ -852,22 +853,22 @@ function trendSvg(matches, refVal, refName) {
     .map((f) => {
       const v = max * f;
       return `<line x1="${TL}" x2="${TW - TR}" y1="${Y(v)}" y2="${Y(v)}" class="grid"/>
-        <text x="${TL - 8}" y="${Y(v) + 4}" text-anchor="end" class="axis">${v.toLocaleString('fr-FR', { maximumFractionDigits: t.d ? 1 : 0 })}</text>`;
+        <text x="${TL - 8}" y="${Y(v) + 4}" text-anchor="end" class="axis">${v.toLocaleString(LOCALE(), { maximumFractionDigits: t.d ? 1 : 0 })}</text>`;
     })
     .join('');
   const line = roll.map((v, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join('');
   const dots = vals.map((v, i) => `<circle cx="${X(i)}" cy="${Y(v)}" r="4" fill="${ME}" fill-opacity=".35"/>`).join('');
   const ref = refVal != null
     ? `<line x1="${TL}" x2="${TW - TR}" y1="${Y(refVal)}" y2="${Y(refVal)}" stroke="${REF}" stroke-width="2" stroke-dasharray="6 5"/>
-       <text x="${TW - TR}" y="${Y(refVal) - 7}" text-anchor="end" class="ref-lbl">${esc(refName)} · ${refVal.toLocaleString('fr-FR', { maximumFractionDigits: t.d })}</text>`
+       <text x="${TW - TR}" y="${Y(refVal) - 7}" text-anchor="end" class="ref-lbl">${esc(refName)} · ${refVal.toLocaleString(LOCALE(), { maximumFractionDigits: t.d })}</text>`
     : '';
-  return `<svg class="trend-svg" viewBox="0 0 ${TW} ${TH}" role="img" aria-label="Évolution ${esc(t.label)}">
+  return `<svg class="trend-svg" viewBox="0 0 ${TW} ${TH}" role="img" aria-label="${tr('Évolution')} ${esc(tr(t.label))}">
     ${grid}${ref}${dots}
     <path d="${line}" fill="none" stroke="${ME}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
     <line id="trend-x" class="crosshair" y1="${TT}" y2="${TH - TB}" x1="-10" x2="-10"/>
     <circle id="trend-dot" r="6" fill="${ME}" stroke="#121814" stroke-width="2" cx="-10" cy="-10"/>
-    <text x="${TL}" y="${TH - 8}" class="axis">← plus ancien</text>
-    <text x="${TW - TR}" y="${TH - 8}" text-anchor="end" class="axis">plus récent →</text>
+    <text x="${TL}" y="${TH - 8}" class="axis">← ${tr('plus ancien')}</text>
+    <text x="${TW - TR}" y="${TH - 8}" text-anchor="end" class="axis">${tr('plus récent')} →</text>
   </svg>`;
 }
 
@@ -877,57 +878,59 @@ function renderStats() {
   if (id == null) return onboarding();
   const p = S.profiles[id];
   if (!p) loadProfile(id);
-  const who = id === mine ? 'Toi' : p?.steam?.personaname || `Joueur ${id}`;
+  const who = id === mine ? tr('Toi') : p?.steam?.personaname || tr('Joueur {id}', { id });
   const tier = S.ranks.find((t) => t.tier === S.ana.tier);
-  const refName = `${tier?.name || 'Haut rang'}+`;
+  const refName = `${tier?.name || tr('Haut rang')}+`;
 
   const tierSeg = TIER_CHOICES.map((t) => {
     const r = S.ranks.find((x) => x.tier === t);
     return `<button data-tier="${t}" class="${S.ana.tier === t ? 'on' : ''}">${r?.images?.small_webp || r?.images?.large_webp ? `<img src="${esc(r.images.small_webp || r.images.large_webp)}" alt="">` : ''}${esc(r?.name || t)}</button>`;
   }).join('');
-  const periodSeg = [[30, '30 j'], [90, '90 j'], [0, 'Tout']].map(([v, l]) => `<button data-period="${v}" class="${S.ana.period === v ? 'on' : ''}">${l}</button>`).join('');
-  const heroOpts = `<option value="0">Tous les héros</option>` + S.heroes.map((h) => `<option value="${h.id}" ${S.ana.hero === h.id ? 'selected' : ''}>${esc(h.name)}</option>`).join('');
-  const back = id !== mine ? '<button class="back" data-action="back-stats">← Retour au profil</button>' : '';
-  const head = `${back}<h1 class="page">Analyse${id !== mine ? ` · ${esc(who)}` : ''}</h1>
-    <p class="sub">${id === mine ? 'Tes' : 'Ses'} statistiques face à celles des joueurs ${esc(refName)}.</p>
+  const periodSeg = [[30, tr('30 j')], [90, tr('90 j')], [0, tr('Tout')]].map(([v, l]) => `<button data-period="${v}" class="${S.ana.period === v ? 'on' : ''}">${l}</button>`).join('');
+  const heroOpts = `<option value="0">${tr('Tous les héros')}</option>` + S.heroes.map((h) => `<option value="${h.id}" ${S.ana.hero === h.id ? 'selected' : ''}>${esc(h.name)}</option>`).join('');
+  const back = id !== mine ? `<button class="back" data-action="back-stats">← ${tr('Retour au profil')}</button>` : '';
+  const head = `${back}<h1 class="page">${tr('Analyse')}${id !== mine ? ` · ${esc(who)}` : ''}</h1>
+    <p class="sub">${id === mine ? tr('Tes statistiques face à celles des joueurs {ref}.', { ref: esc(refName) }) : tr('Ses statistiques face à celles des joueurs {ref}.', { ref: esc(refName) })}</p>
     <div class="card ana-filters">
-      <div class="f"><small>Comparer à</small><div class="seg">${tierSeg}</div></div>
-      <div class="f"><small>Période</small><div class="seg">${periodSeg}</div></div>
-      <div class="f"><small>Héros</small><select class="input" id="ana-hero">${heroOpts}</select></div>
+      <div class="f"><small>${tr('Comparer à')}</small><div class="seg">${tierSeg}</div></div>
+      <div class="f"><small>${tr('Période')}</small><div class="seg">${periodSeg}</div></div>
+      <div class="f"><small>${tr('Héros')}</small><select class="input" id="ana-hero">${heroOpts}</select></div>
     </div>`;
 
   const me = useMetrics(metricsUrl(id));
   const ref = useMetrics(metricsUrl(null));
-  if (me.loading || ref.loading) return head + spinner('Calcul des statistiques…');
+  if (me.loading || ref.loading) return head + spinner(tr('Calcul des statistiques…'));
   if (me.err || ref.err) return head + `<div class="error">${esc(me.err || ref.err)}</div>`;
   const M = me.data || {};
   const B = ref.data || {};
   const avail = METRICS.filter((m) => Number.isFinite(M[m.k]?.avg) && Number.isFinite(B[m.k]?.avg));
-  if (!avail.length) return head + '<div class="center">Pas assez de matchs sur cette période.</div>';
+  if (!avail.length) return head + `<div class="center">${tr('Pas assez de matchs sur cette période.')}</div>`;
 
   const scored = avail.map((m) => {
     const pc = pctOf(B[m.k], M[m.k].avg);
     const delta = pct(M[m.k].avg - B[m.k].avg, B[m.k].avg);
-    return { ...m, me: M[m.k].avg, ref: B[m.k].avg, dist: B[m.k], score: m.low ? 100 - pc : pc, good: m.low ? delta <= 0 : delta >= 0, delta };
+    return { ...m, label: tr(m.label), me: M[m.k].avg, ref: B[m.k].avg, dist: B[m.k], score: m.low ? 100 - pc : pc, good: m.low ? delta <= 0 : delta >= 0, delta };
   });
-  const axes = scored.filter((m) => m.axis).map((m) => ({ label: m.axis, score: m.score }));
+  const axes = scored.filter((m) => m.axis).map((m) => ({ label: tr(m.axis), score: m.score }));
   const index = axes.reduce((s, a) => s + a.score, 0) / Math.max(1, axes.length);
   const sorted = [...scored].sort((a, b) => b.score - a.score);
   const row = (m) => `<div class="sw-row"><span>${esc(m.label)}</span><div class="bar"><i style="width:${m.score}%"></i></div><b class="mono">${Math.round(m.score)}</b></div>`;
 
   const top = `<div class="ana-top">
     <div class="card ornate radar-card">
-      <div class="legend"><span><i class="sw" style="background:${ME}"></i>${esc(who)}</span><span><i class="sw dash" style="border-color:${REF}"></i>Médiane ${esc(refName)}</span></div>
+      <div class="legend"><span><i class="sw" style="background:${ME}"></i>${esc(who)}</span><span><i class="sw dash" style="border-color:${REF}"></i>${tr('Médiane {ref}', { ref: esc(refName) })}</span></div>
       ${radarSvg(axes, refName)}
     </div>
     <div class="card ornate summary">
       <div class="idx-row">
-        <div><div class="label">Indice de performance</div><div class="index mono">${Math.round(index)}</div>
-          <div class="muted idx-note">50 = joueur médian ${esc(refName)}. Au-dessus, ${id === mine ? 'tu fais' : 'il/elle fait'} mieux que la plupart d'entre eux.</div></div>
+        <div><div class="label">${tr('Indice de performance')}</div><div class="index mono">${Math.round(index)}</div>
+          <div class="muted idx-note">${id === mine
+            ? tr("50 = joueur médian {ref}. Au-dessus, tu fais mieux que la plupart d'entre eux.", { ref: esc(refName) })
+            : tr("50 = joueur médian {ref}. Au-dessus, il/elle fait mieux que la plupart d'entre eux.", { ref: esc(refName) })}</div></div>
         ${tier?.images?.large_webp ? `<img class="idx-badge" src="${esc(tier.images.large_webp)}" alt="">` : ''}
       </div>
-      <div class="sw-title win">▲ Points forts</div>${sorted.slice(0, 3).map(row).join('')}
-      <div class="sw-title loss">▼ À travailler</div>${sorted.slice(-3).reverse().map(row).join('')}
+      <div class="sw-title win">▲ ${tr('Points forts')}</div>${sorted.slice(0, 3).map(row).join('')}
+      <div class="sw-title loss">▼ ${tr('À travailler')}</div>${sorted.slice(-3).reverse().map(row).join('')}
     </div>
   </div>`;
 
@@ -940,19 +943,19 @@ function renderStats() {
           <span class="delta ${m.good ? 'good' : 'bad'}">${m.good ? '▲' : '▼'} ${m.delta > 0 ? '+' : ''}${m.delta.toFixed(0)}%</span></div>
         <div class="m-vals"><span class="m-me"><i class="sw" style="background:${ME}"></i>${fmtM(m, m.me)}</span>
           <span class="m-ref"><i class="sw dash" style="border-color:${REF}"></i>${esc(refName)} ${fmtM(m, m.ref)}</span></div>
-        <div class="strip" title="Distribution ${esc(refName)} : 5 % = ${fmtM(m, m.dist.percentile5)}, médiane = ${fmtM(m, m.dist.percentile50)}, 95 % = ${fmtM(m, m.dist.percentile95)}">
+        <div class="strip" title="${tr('Distribution {ref} : 5 % = {p5}, médiane = {p50}, 95 % = {p95}', { ref: esc(refName), p5: fmtM(m, m.dist.percentile5), p50: fmtM(m, m.dist.percentile50), p95: fmtM(m, m.dist.percentile95) })}">
           <span class="range" style="left:${pos(m.dist.percentile5)}%;right:${100 - pos(m.dist.percentile95)}%"></span>
           <span class="iqr" style="left:${pos(m.dist.percentile25)}%;right:${100 - pos(m.dist.percentile75)}%"></span>
           <span class="med" style="left:${pos(m.dist.percentile50)}%"></span>
           <span class="mine" style="left:${pos(m.me)}%" title="${esc(who)} : ${fmtM(m, m.me)}"></span>
         </div>
-        <div class="strip-scale"><span>${fmtM(m, lo)}</span><span>${m.low ? 'moins = mieux' : ''}</span><span>${fmtM(m, hi)}</span></div>
+        <div class="strip-scale"><span>${fmtM(m, lo)}</span><span>${m.low ? tr('moins = mieux') : ''}</span><span>${fmtM(m, hi)}</span></div>
       </div>`;
     })
     .join('');
 
   // trend from match history, same filters
-  let trend = spinner('Chargement de l’historique…');
+  let trend = spinner(tr('Chargement de l’historique…'));
   if (p?.matches) {
     const day = Math.floor(Date.now() / 1000);
     const list = p.matches
@@ -961,22 +964,22 @@ function renderStats() {
       .slice(0, 40)
       .reverse();
     const t = TRENDS[S.ana.trend];
-    const seg = Object.entries(TRENDS).map(([k, v]) => `<button data-trend="${k}" class="${S.ana.trend === k ? 'on' : ''}">${v.label}</button>`).join('');
+    const seg = Object.entries(TRENDS).map(([k, v]) => `<button data-trend="${k}" class="${S.ana.trend === k ? 'on' : ''}">${tr(v.label)}</button>`).join('');
     trend = `<div class="card ornate trend-card">
       <div class="trend-head"><div class="seg">${seg}</div>
-        <div class="legend"><span><i class="sw" style="background:${ME}"></i>${esc(who)} · moyenne sur 10 matchs</span>
-          <span><i class="dot" style="background:${ME}"></i>un match</span>
-          <span><i class="sw dash" style="border-color:${REF}"></i>Moyenne ${esc(refName)}</span></div></div>
+        <div class="legend"><span><i class="sw" style="background:${ME}"></i>${esc(who)} · ${tr('moyenne sur 10 matchs')}</span>
+          <span><i class="dot" style="background:${ME}"></i>${tr('un match')}</span>
+          <span><i class="sw dash" style="border-color:${REF}"></i>${tr('Moyenne {ref}', { ref: esc(refName) })}</span></div></div>
       ${list.length > 1
         ? `<div class="trend-plot">${trendSvg(list, B[t.ref]?.avg, refName)}<div id="trend-tip" hidden></div></div>`
-        : '<div class="center">Pas assez de matchs pour tracer une évolution.</div>'}
+        : `<div class="center">${tr('Pas assez de matchs pour tracer une évolution.')}</div>`}
     </div>`;
   }
 
   return head + top
-    + `<div class="section-title">Détail par statistique</div><div class="metric-grid">${cards}</div>`
-    + `<div class="section-title">Évolution · ${TRENDS[S.ana.trend].label}</div>${trend}`
-    + `<p class="foot-note">Moyennes par match. Les joueurs ${esc(refName)} sont ceux des matchs dont le rang moyen est ${esc(refName)}, sur ${S.ana.period || 90} jours max. Données deadlock-api.com.</p>`;
+    + `<div class="section-title">${tr('Détail par statistique')}</div><div class="metric-grid">${cards}</div>`
+    + `<div class="section-title">${tr('Évolution')} · ${tr(TRENDS[S.ana.trend].label)}</div>${trend}`
+    + `<p class="foot-note">${tr('Moyennes par match. Les joueurs {ref} sont ceux des matchs dont le rang moyen est {ref}, sur {days} jours max. Données deadlock-api.com.', { ref: esc(refName), days: S.ana.period || 90 })}</p>`;
 }
 
 // one checkbox per role present in the hero list, with its hero count
@@ -997,7 +1000,7 @@ function heroGrid() {
   const list = S.heroes.filter((h) => h.name.toLowerCase().includes(q) && !S.hiddenRoles.has(h.hero_type || ''));
   if (S.sort === 'wr') list.sort((a, b) => stat(b).wr - stat(a).wr);
   if (S.sort === 'pick') list.sort((a, b) => stat(b).pick - stat(a).pick);
-  if (!list.length) return '<div class="muted">Aucun héros trouvé.</div>';
+  if (!list.length) return `<div class="muted">${tr('Aucun héros trouvé.')}</div>`;
   return list
     .map((h) => {
       const s = S.heroStats[h.id];
@@ -1014,13 +1017,13 @@ function heroGrid() {
 }
 
 function renderHeroes() {
-  if (!S.heroes.length) return spinner('Chargement des héros…');
-  const seg = [['name', 'Nom'], ['wr', 'Winrate'], ['pick', 'Popularité']]
+  if (!S.heroes.length) return spinner(tr('Chargement des héros…'));
+  const seg = [['name', tr('Nom')], ['wr', 'Winrate'], ['pick', tr('Popularité')]]
     .map(([k, l]) => `<button data-sort="${k}" class="${S.sort === k ? 'on' : ''}">${l}</button>`)
     .join('');
-  return `<h1 class="page">Héros</h1>
-    <p class="sub">Winrate et taux de pick sur les 14 derniers jours, tous rangs confondus.</p>
-    <div class="toolbar"><input class="input" id="search" placeholder="Rechercher un héros…" value="${esc(S.search)}"><div class="seg">${seg}</div></div>
+  return `<h1 class="page">${tr('Héros')}</h1>
+    <p class="sub">${tr('Winrate et taux de pick sur les 14 derniers jours, tous rangs confondus.')}</p>
+    <div class="toolbar"><input class="input" id="search" placeholder="${tr('Rechercher un héros…')}" value="${esc(S.search)}"><div class="seg">${seg}</div></div>
     <div class="role-filter">${roleFilter()}</div>
     <div class="hero-grid" id="grid">${heroGrid()}</div>`;
 }
@@ -1030,7 +1033,7 @@ function renderHero() {
   if (!h) return spinner();
   const s = S.heroStats[h.id];
   const img = h.images || {};
-  const banner = `<button class="back" data-action="back">← Tous les héros</button>
+  const banner = `<button class="back" data-action="back">← ${tr('Tous les héros')}</button>
     <div class="hero-banner">
       ${img.background_image_webp ? `<img class="bg" src="${esc(img.background_image_webp)}" alt="">` : ''}
       <img class="portrait" src="${esc(img.icon_hero_card_webp)}" alt="" style="-webkit-mask-image:linear-gradient(90deg,transparent,#000 35%)">
@@ -1040,12 +1043,12 @@ function renderHero() {
         ${h.description?.playstyle ? `<div class="play">${esc(strip(h.description.playstyle))}</div>` : ''}
         <div class="chips">
           ${s ? `<span class="chip ${wrClass(s.wr)}">${s.wr.toFixed(1)}% WR</span><span class="chip">${s.pick.toFixed(1)}% pick</span>` : ''}
-          ${h.hero_type ? `<span class="chip">${esc(TYPES[h.hero_type] || h.hero_type)}</span>` : ''}
+          ${h.hero_type ? `<span class="chip">${esc(roleName(h.hero_type))}</span>` : ''}
           ${h.gun_tag ? `<span class="chip">${esc(h.gun_tag)}</span>` : ''}
         </div>
       </div>
     </div>`;
-  const tabs = `<div class="tabs">${[['builds', 'Builds'], ['popular', 'Objets populaires']]
+  const tabs = `<div class="tabs">${[['builds', 'Builds'], ['popular', tr('Objets populaires')]]
     .map(([k, l]) => `<button data-tab="${k}" class="${S.heroTab === k ? 'on' : ''}">${l}</button>`)
     .join('')}</div>`;
 
@@ -1053,15 +1056,15 @@ function renderHero() {
   if (S.heroTab === 'builds') {
     loadBuilds(h.id);
     const b = S.builds[h.id];
-    if (!b || b.loading) body = spinner('Chargement des builds…');
+    if (!b || b.loading) body = spinner(tr('Chargement des builds…'));
     else if (b.error) body = `<div class="error">${esc(b.error)}</div>`;
-    else if (!b.list.length) body = '<div class="center">Aucun build publié pour ce héros.</div>';
+    else if (!b.list.length) body = `<div class="center">${tr('Aucun build publié pour ce héros.')}</div>`;
     else {
       const idx = Math.min(S.buildIdx, b.list.length - 1);
       const list = b.list
         .map((w, i) => `<button class="build-item ${i === idx ? 'on' : ''}" data-build="${i}">
-          <div class="t">${esc(w.hero_build.name || 'Sans nom')}</div>
-          <div class="m"><span>★ ${(w.num_favorites || 0).toLocaleString('fr-FR')}</span><span>${w.hero_build.last_updated_timestamp ? ago(w.hero_build.last_updated_timestamp) : ''}</span></div>
+          <div class="t">${esc(w.hero_build.name || tr('Sans nom'))}</div>
+          <div class="m"><span>★ ${num(w.num_favorites || 0)}</span><span>${w.hero_build.last_updated_timestamp ? ago(w.hero_build.last_updated_timestamp) : ''}</span></div>
         </button>`)
         .join('');
       const hb = b.list[idx].hero_build;
@@ -1071,9 +1074,9 @@ function renderHero() {
           <div class="items">${c.mods.map((md) => itemTile(md.ability_id)).join('')}</div></div>`)
         .join('');
       body = `<div class="builds"><div class="build-list">${list}</div>
-        <div class="card ornate build-view"><h3>${esc(hb.name || 'Sans nom')}</h3>
+        <div class="card ornate build-view"><h3>${esc(hb.name || tr('Sans nom'))}</h3>
           ${hb.description ? `<div class="desc">${esc(strip(hb.description))}</div>` : ''}
-          ${cats || '<div class="muted" style="margin-top:14px">Ce build ne contient aucun objet.</div>'}
+          ${cats || `<div class="muted" style="margin-top:14px">${tr('Ce build ne contient aucun objet.')}</div>`}
         </div></div>`;
     }
   } else {
@@ -1088,9 +1091,9 @@ function renderHero() {
           <div class="pct">${x.pick_pct.toFixed(0)}%<small>pick</small></div>
           <div class="pct ${wrClass(x.winrate_pct)}">${x.winrate_pct.toFixed(1)}%<small>winrate</small></div></div>`)
         .join('');
-      return `<div class="card ornate phase"><h4>${label}</h4>${rows || '<div class="muted">Pas de données</div>'}</div>`;
+      return `<div class="card ornate phase"><h4>${label}</h4>${rows || `<div class="muted">${tr('Pas de données')}</div>`}</div>`;
     };
-    body = `<div class="phases">${phase('early_game', 'Début de partie')}${phase('mid_game', 'Milieu de partie')}${phase('late_game', 'Fin de partie')}</div>`;
+    body = `<div class="phases">${phase('early_game', tr('Début de partie'))}${phase('mid_game', tr('Milieu de partie'))}${phase('late_game', tr('Fin de partie'))}</div>`;
   }
   return banner + tabs + body;
 }
@@ -1115,7 +1118,7 @@ function openPlayer(id) {
 }
 
 document.addEventListener('click', (e) => {
-  const t = e.target.closest('[data-win],[data-view],[data-hero],[data-player],[data-match],[data-sort],[data-tab],[data-build],[data-tier],[data-period],[data-trend],[data-action]');
+  const t = e.target.closest('[data-win],[data-view],[data-hero],[data-player],[data-match],[data-sort],[data-tab],[data-build],[data-tier],[data-period],[data-trend],[data-lang],[data-action]');
   if (!t) return;
   const d = t.dataset;
   if (d.win) return T.window.getCurrentWindow()[d.win]();
@@ -1127,6 +1130,14 @@ document.addEventListener('click', (e) => {
     }
     if (d.view === 'stats') S.anaFor = null;
     return render(true);
+  }
+  if (d.lang) {
+    if (d.lang === LANG()) return;
+    S.cfg.lang = d.lang;
+    saveConfig();
+    // reload so every text, number format and the game data (item names...) switch language
+    setTimeout(() => location.reload(), 300);
+    return;
   }
   if (d.tier || d.period || d.trend) {
     if (d.tier) S.ana.tier = Number(d.tier);
@@ -1195,7 +1206,7 @@ document.addEventListener('submit', (e) => {
   e.preventDefault();
   const v = e.target.sid.value.trim();
   const id = accountId(v);
-  if (id == null) return toast('Steam ID invalide');
+  if (id == null) return toast(tr('Steam ID invalide'));
   S.cfg.steamId = v;
   S.editingId = false;
   S.viewing = null;
@@ -1244,10 +1255,10 @@ document.addEventListener('mousemove', (e) => {
   dot.setAttribute('cx', p.x);
   dot.setAttribute('cy', p.y);
   const w = isWin(p.m);
-  tip.innerHTML = `<b>${esc(S.heroById[p.m.hero_id]?.name || '')}</b> <span class="${w ? 'win' : 'loss'}">${w ? 'Victoire' : 'Défaite'}</span>
+  tip.innerHTML = `<b>${esc(S.heroById[p.m.hero_id]?.name || '')}</b> <span class="${w ? 'win' : 'loss'}">${w ? tr('Victoire') : tr('Défaite')}</span>
     <div class="muted">${ago(p.m.start_time)}</div>
-    <div>${esc(t.label)} : <b class="mono">${p.v.toLocaleString('fr-FR', { maximumFractionDigits: t.d })}</b></div>
-    <div class="muted">Moyenne 10 matchs : <span class="mono">${p.r.toLocaleString('fr-FR', { maximumFractionDigits: t.d })}</span></div>`;
+    <div>${esc(tr(t.label))} : <b class="mono">${p.v.toLocaleString(LOCALE(), { maximumFractionDigits: t.d })}</b></div>
+    <div class="muted">${tr('Moyenne 10 matchs : {v}', { v: `<span class="mono">${p.r.toLocaleString(LOCALE(), { maximumFractionDigits: t.d })}</span>` })}</div>`;
   tip.hidden = false;
   const px = (p.x / TW) * r.width;
   tip.style.left = `${Math.min(r.width - 200, Math.max(0, px + 14))}px`;
