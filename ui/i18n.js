@@ -270,4 +270,52 @@ const EN = {
   'Publié le {date}': 'Published {date}',
   'notes officielles de Valve (en anglais)': "Valve's official notes",
   'Nouveau patch : {title}': 'New patch: {title}',
+  'Nouveau patch Deadlock': 'New Deadlock patch',
+
+  // Windows (tray, startup, notifications)
+  'Ouvrir': 'Open',
+  'Quitter': 'Quit',
+  'Lancer l’app au démarrage de Windows (discrètement, dans la zone de notification)': 'Start the app with Windows (quietly, in the notification area)',
+  'Fermer la fenêtre garde l’app dans la zone de notification (à côté de l’horloge)': 'Closing the window keeps the app in the notification area (next to the clock)',
+  'Notification Windows quand un nouveau patch sort': 'Windows notification when a new patch is released',
+  'Pour quitter complètement : clic droit sur l’icône près de l’horloge → Quitter.': 'To quit completely: right-click the icon next to the clock → Quit.',
+  'Réglage impossible : {e}': 'Could not change the setting: {e}',
+
+  // live scouting, rank history, comparison
+  'Analyse du joueur…': 'Scouting player…',
+  '{n} parties sur ce héros · {wr} %': '{n} matches on this hero · {wr}%',
+  'Première partie sur ce héros': 'First match on this hero',
+  'Forme : {w}V {l}D': 'Form: {w}W {l}L',
+  'Évolution du rang': 'Rank history',
+  '{n} parties classées': '{n} ranked matches',
+  'Comparer avec moi': 'Compare with me',
+  'Comparé à {name}': 'Compared with {name}',
+  'Retirer': 'Remove',
+
+  // heroes: rank filter, matchups, own stats
+  'Winrate et taux de pick sur les 14 derniers jours, matchs de niveau {r} et plus.': 'Win rate and pick rate over the last 14 days, {r} matches and above.',
+  'Tous rangs': 'All ranks',
+  'Chargement des matchups…': 'Loading matchups…',
+  'Pas assez de matchs à ce rang pour ce héros.': 'Not enough matches at this rank for this hero.',
+  'matchs': 'matches',
+  'Winrate de {hero} face à chaque héros ennemi, 14 derniers jours.': "{hero}'s win rate against each enemy hero, last 14 days.",
+  'Fort contre': 'Strong against',
+  'Faible contre': 'Weak against',
+  'Tes stats': 'Your stats',
+  'Connecte ton profil pour voir tes stats sur ce héros.': 'Connect your profile to see your stats on this hero.',
+  'Chargement de tes stats…': 'Loading your stats…',
+  'Tu n’as pas encore joué ce héros.': "You haven't played this hero yet.",
+  'Précision {a} % · dernière partie {ago}': 'Accuracy {a}% · last match {ago}',
+  'Comparer aux hauts rangs': 'Compare with high ranks',
+
+  // leaderboard
+  'Classement': 'Ladder', // short: fits the side menu
+  'Les meilleurs joueurs classés de chaque région, d’après le classement officiel du jeu.': "The best ranked players of each region, from the game's official leaderboard.",
+  'Chargement du classement…': 'Loading leaderboard…',
+  'Classement vide pour ce choix.': 'Empty leaderboard for this selection.',
+  'Europe': 'Europe',
+  'Amérique du Nord': 'North America',
+  'Amérique du Sud': 'South America',
+  'Asie': 'Asia',
+  'Océanie': 'Oceania',
 };

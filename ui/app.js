@@ -7,7 +7,10 @@ const view = document.getElementById('view');
 const S = {
   cfg: { steamId: '' },
   view: 'profile',
-  heroes: [], heroById: {}, items: {}, ranks: [], heroStats: {},
+  heroes: [], heroById: {}, items: {}, ranks: [],
+  heroTier: 0, // Héros: rank filter (0 = all ranks, else min tier like the Analyse choices)
+  heroStatsBy: {}, countersBy: {}, // tier -> { loading, data, err }
+  myHeroStats: null, // { loading, data: hero id -> my stats on it }
   profiles: {}, // account id -> { loading, err, steam, rank, matches, mates, matesErr, names }
   viewing: null, // account id shown in the profile view (null = mine)
   stack: [], // previously viewed profiles, for "Retour"
@@ -167,16 +170,20 @@ async function boot() {
   }
   S.prevPatchSeen = S.cfg.patchSeen; // last patch read before this launch
   applyStaticTexts();
+  T.core.invoke('set_tray_labels', { open: tr('Ouvrir'), quit: tr('Quitter') }).catch(() => {});
+  T.core.invoke('get_autostart').then((on) => {
+    S.autostart = on;
+    if (S.view === 'settings') render();
+  }).catch(() => {});
   render(true);
 
-  const since = Math.floor(Date.now() / 1000) - 14 * 86400;
+  loadHeroStats(0);
   // game texts (item names, hero descriptions, ranks) in the app's language
   const gameLang = LANG() === 'fr' ? 'french' : 'english';
-  const [heroes, items, ranks, stats] = await Promise.allSettled([
+  const [heroes, items, ranks] = await Promise.allSettled([
     api(`/assets/heroes?only_active=true&language=${gameLang}`),
     api(`/assets/items?language=${gameLang}`),
     api(`/assets/ranks?language=${gameLang}`),
-    api(`/analytics/hero-stats?min_unix_timestamp=${since}`),
   ]);
   if (heroes.status === 'fulfilled') {
     S.heroes = heroes.value.filter((h) => h.player_selectable && !h.disabled).sort((a, b) => a.name.localeCompare(b.name));
@@ -184,16 +191,6 @@ async function boot() {
   }
   if (items.status === 'fulfilled') S.items = Object.fromEntries(items.value.map((i) => [i.id, i]));
   if (ranks.status === 'fulfilled') S.ranks = ranks.value;
-  if (stats.status === 'fulfilled') {
-    const agg = {};
-    for (const s of stats.value) {
-      const a = (agg[s.hero_id] ??= { wins: 0, matches: 0 });
-      a.wins += s.wins;
-      a.matches += s.matches;
-    }
-    const games = Object.values(agg).reduce((t, a) => t + a.matches, 0) / 12; // 12 heroes per match
-    for (const [id, a] of Object.entries(agg)) S.heroStats[id] = { wr: pct(a.wins, a.matches), pick: pct(a.matches, games) };
-  }
   if ([heroes, items].some((r) => r.status === 'rejected')) toast(tr("Impossible de joindre l'API Deadlock"));
 
   if (myId() != null) {
@@ -321,6 +318,57 @@ async function loadMatch(id) {
   render();
 }
 
+const since14 = () => Math.floor(Date.now() / 86400000) * 86400 - 14 * 86400; // day-rounded: stable urls
+const badgeFilter = (tier) => (tier ? `&min_average_badge=${tier * 10 + 1}` : '');
+const rerenderHeroes = () => (S.view === 'heroes' || S.view === 'hero') && render();
+
+/** Win rate and pick rate per hero over 14 days, for matches of the given rank and above. */
+async function loadHeroStats(tier) {
+  if (S.heroStatsBy[tier]) return;
+  const c = (S.heroStatsBy[tier] = { loading: true });
+  try {
+    const agg = {};
+    for (const s of await api(`/analytics/hero-stats?min_unix_timestamp=${since14()}${badgeFilter(tier)}`)) {
+      const a = (agg[s.hero_id] ??= { wins: 0, matches: 0 });
+      a.wins += s.wins;
+      a.matches += s.matches;
+    }
+    const games = Object.values(agg).reduce((t, a) => t + a.matches, 0) / 12; // 12 heroes per match
+    c.data = Object.fromEntries(Object.entries(agg).map(([id, a]) => [id, { wr: pct(a.wins, a.matches), pick: pct(a.matches, games) }]));
+  } catch (e) {
+    c.err = e.message;
+  }
+  c.loading = false;
+  rerenderHeroes();
+}
+const heroStats = () => S.heroStatsBy[S.heroTier]?.data || {};
+
+/** Hero vs enemy hero win rates (14 days, same rank filter), for "fort contre / faible contre". */
+async function loadCounters(tier) {
+  if (S.countersBy[tier]) return;
+  const c = (S.countersBy[tier] = { loading: true });
+  try {
+    c.data = await api(`/analytics/hero-counter-stats?min_unix_timestamp=${since14()}${badgeFilter(tier)}`);
+  } catch (e) {
+    c.err = e.message;
+  }
+  c.loading = false;
+  rerenderHeroes();
+}
+
+async function loadMyHeroStats() {
+  const id = myId();
+  if (id == null || S.myHeroStats?.id === id) return;
+  const c = (S.myHeroStats = { id, loading: true });
+  try {
+    c.data = Object.fromEntries((await api(`/players/${id}/hero-stats`)).map((s) => [s.hero_id, s]));
+  } catch (e) {
+    c.err = e.message;
+  }
+  c.loading = false;
+  rerenderHeroes();
+}
+
 async function loadBuilds(id) {
   if (S.builds[id]) return;
   S.builds[id] = { loading: true };
@@ -334,7 +382,7 @@ async function loadBuilds(id) {
 
 // ---------- views ----------
 function render(animate = false) {
-  let html = { profile: renderProfile, heroes: renderHeroes, hero: renderHero, match: renderMatch, stats: renderStats, live: renderLive, patch: renderPatch, settings: renderSettings }[S.view]();
+  let html = { profile: renderProfile, heroes: renderHeroes, hero: renderHero, match: renderMatch, stats: renderStats, live: renderLive, leaderboard: renderLeaderboard, patch: renderPatch, settings: renderSettings }[S.view]();
   // ask once about sharing, on the user's own profile
   if (S.view === 'profile' && S.viewing == null && !S.editingId && myId() != null && S.cfg.shareMatches === undefined) {
     html = shareBanner() + html;
@@ -379,6 +427,13 @@ function renderSettings() {
     <div class="section-title">${tr('Compte Steam')}</div>
     <div class="card setting"><div>${id != null ? tr('Compte connecté : {id}', { id: `<span class="mono">${id}</span>` }) : tr('Aucun compte connecté.')}</div>
       <button class="btn sm" data-action="settings-change-id">${tr('Changer de compte')}</button></div>
+    <div class="section-title">Windows</div>
+    <div class="card setting win-opts">
+      <label class="toggle"><input type="checkbox" id="autostart-toggle" ${S.autostart ? 'checked' : ''}>${tr('Lancer l’app au démarrage de Windows (discrètement, dans la zone de notification)')}</label>
+      <label class="toggle"><input type="checkbox" id="tray-toggle" ${S.cfg.tray !== false ? 'checked' : ''}>${tr('Fermer la fenêtre garde l’app dans la zone de notification (à côté de l’horloge)')}</label>
+      <label class="toggle"><input type="checkbox" id="notify-toggle" ${S.cfg.notifyPatch !== false ? 'checked' : ''}>${tr('Notification Windows quand un nouveau patch sort')}</label>
+      <p class="muted">${tr('Pour quitter complètement : clic droit sur l’icône près de l’horloge → Quitter.')}</p>
+    </div>
     <div class="section-title">${tr('Partie en direct')}</div>
     <div class="card setting"><p class="muted">${tr("Pour voir ta partie en cours, ajoute {opt} aux options de lancement de Deadlock (Steam → clic droit sur Deadlock → Propriétés → Options de lancement). L'app lit alors l'identifiant de la partie dans le journal du jeu, puis sa diffusion spectateur officielle. Elle n'affiche que ce que montre le tableau des scores et ne touche jamais au jeu.", { opt: '<b>-condebug</b>' })}</p></div>
     <div class="section-title">${tr('Version')}</div>
@@ -445,6 +500,7 @@ function renderProfile() {
     ${rankHtml}
     <div class="head-actions">
       <button class="icon-btn" data-action="analyze" title="${tr('Analyser ses stats')}"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg></button>
+      ${!isMine && mine != null ? `<button class="icon-btn" data-action="compare" title="${tr('Comparer avec moi')}"><svg viewBox="0 0 24 24"><circle cx="8" cy="8" r="3"/><circle cx="16" cy="16" r="3"/><path d="M3 21c.5-3 2.5-5 5-5M21 3c-.5 3-2.5 5-5 5"/></svg></button>` : ''}
       <button class="icon-btn" data-action="refresh" title="${tr('Actualiser')}"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg></button>
       ${isMine ? `<button class="icon-btn" data-action="change-id" title="${tr('Changer de compte')}"><svg viewBox="0 0 24 24"><path d="M16 3h5v5M21 3l-7 7M8 21H3v-5M3 21l7-7"/></svg></button>` : ''}
     </div>
@@ -523,9 +579,40 @@ function renderProfile() {
     .join('');
   const more = m.length > 25 ? `<button class="btn sm more" data-action="more">${S.showAll ? tr('Voir moins') : tr('Voir plus ({n})', { n: Math.min(200, m.length) })}</button>` : '';
   return head + tiles
+    + rankHistoryHtml(m)
     + `<div class="section-title">${tr('Joue le plus avec')}</div>${mates}`
     + topHtml
     + `<div class="section-title">${tr('Derniers matchs')}</div><div class="matches">${rows}</div>${more}`;
+}
+
+/** Rank over the last ranked matches (match_mode 4), from the badge the history stores per match. */
+function rankHistoryHtml(m) {
+  // matches are newest first; badge = tier * 10 + subrank (1-6)
+  const ranked = m.filter((x) => x.match_mode === 4 && x.ranked_display_badge > 0).slice(0, 100).reverse();
+  if (ranked.length < 2) return '';
+  const val = (b) => Math.floor(b / 10) * 6 + (b % 10) - 1;
+  const vals = ranked.map((x) => val(x.ranked_display_badge));
+  const lo = Math.min(...vals) - 1, hi = Math.max(...vals) + 1;
+  const W = 820, H = 200, L = 120, R = 18, T = 12, B = 14;
+  const X = (i) => L + (i * (W - L - R)) / (vals.length - 1);
+  const Y = (v) => T + ((H - T - B) * (hi - v)) / (hi - lo);
+  const rankName = (v) => `${S.ranks.find((t) => t.tier === Math.floor(v / 6))?.name || ''} ${(v % 6) + 1}`;
+  const grid = [];
+  for (let v = Math.ceil(lo); v <= hi; v++) {
+    if (hi - lo > 12 && v % 6) continue; // long range: one line per rank, else one per subrank
+    grid.push(`<line x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}" class="grid"/>
+      <text x="${L - 8}" y="${Y(v) + 4}" text-anchor="end" class="axis">${esc(rankName(v))}</text>`);
+  }
+  const line = vals.map((v, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join('');
+  const dots = ranked.map((x, i) => `<circle cx="${X(i)}" cy="${Y(vals[i])}" r="3.5" class="${isWin(x) ? 'rk-w' : 'rk-l'}"><title>${esc(rankName(vals[i]))} · ${isWin(x) ? tr('Victoire') : tr('Défaite')} · ${ago(x.start_time)}</title></circle>`).join('');
+  const first = ranked[0].ranked_display_badge, last = ranked.at(-1).ranked_display_badge;
+  return `<div class="section-title">${tr('Évolution du rang')}</div>
+    <div class="card ornate rank-card">
+      <div class="rank-sum">${badgeHtml(first)}<span class="muted">→</span>${badgeHtml(last)}
+        <span class="muted">${tr('{n} parties classées', { n: ranked.length })}</span></div>
+      <svg class="trend-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="${tr('Évolution du rang')}">
+        ${grid.join('')}<path d="${line}" fill="none" stroke="${ME}" stroke-width="2.5" stroke-linejoin="round"/>${dots}</svg>
+    </div>`;
 }
 
 const TEAMS = ['Amber Hand', 'Sapphire Flame'];
@@ -667,10 +754,45 @@ async function loadLive() {
       if (ranks.status === 'fulfilled') for (const r of [].concat(ranks.value)) live.ranks[r.account_id] = r.badge;
     }
     S.live = live;
+    if (match) loadScout(match);
   } catch (e) {
     S.live = { err: e.message };
   }
   if (S.view === 'live') render();
+}
+
+/** Scouting, once per match: each player's record on the hero they're playing + recent form. */
+async function loadScout(match) {
+  if (S.scout?.mid === match.match_id) return;
+  const sc = (S.scout = { mid: match.match_id, hero: {}, form: {}, done: false });
+  const ids = match.players.map((p) => p.account_id).filter(Boolean);
+  const [hs, ...hist] = await Promise.allSettled([
+    api(`/players/hero-stats?account_ids=${ids.join(',')}`),
+    ...ids.map((id) => api(`/players/${id}/match-history`)),
+  ]);
+  if (hs.status === 'fulfilled') for (const s of hs.value) (sc.hero[s.account_id] ??= {})[s.hero_id] = s;
+  hist.forEach((h, i) => {
+    if (h.status === 'fulfilled') {
+      sc.form[ids[i]] = h.value.filter((x) => x.game_mode === 1).sort((a, b) => b.start_time - a.start_time).slice(0, 20).map(isWin);
+    }
+  });
+  sc.done = true;
+  if (S.view === 'live') render();
+}
+
+function scoutHtml(p, mid) {
+  const sc = S.scout;
+  if (!p.account_id || sc?.mid !== mid) return '';
+  if (!sc.done) return `<small class="scout muted">${tr('Analyse du joueur…')}</small>`;
+  const form = sc.form[p.account_id];
+  if (!form) return ''; // private / unknown player
+  const h = sc.hero[p.account_id]?.[p.hero_id];
+  const hero = h
+    ? tr('{n} parties sur ce héros · {wr} %', { n: num(h.matches_played), wr: `<span class="${wrClass(pct(h.wins, h.matches_played))}">${pct(h.wins, h.matches_played).toFixed(0)}</span>` })
+    : `<span class="gold">${tr('Première partie sur ce héros')}</span>`;
+  const w = form.filter(Boolean).length;
+  const formTxt = form.length ? ` · ${tr('Forme : {w}V {l}D', { w, l: form.length - w })}` : '';
+  return `<small class="scout">${hero}<span class="${wrClass(pct(w, form.length))}">${formTxt}</span></small>`;
 }
 
 function renderLive() {
@@ -725,7 +847,7 @@ function renderLive() {
         return `<div class="lp ${p.account_id === me ? 'me' : ''}">
           <img class="h" src="${esc(heroImg(p.hero_id))}" alt="" title="${esc(S.heroById[p.hero_id]?.name || '')}">
           <div class="nm">${p.account_id ? `<button class="link" data-player="${p.account_id}">${esc(name)}</button>` : `<span class="muted">${esc(name)}</span>`}
-            <small>${esc(S.heroById[p.hero_id]?.name || '')}</small></div>
+            <small>${esc(S.heroById[p.hero_id]?.name || '')}</small>${scoutHtml(p, m.match_id)}</div>
           ${stats}
           ${badgeHtml(L.ranks[p.account_id]) || `<span class="badge">${tr('Non classé')}</span>`}
         </div>`;
@@ -751,6 +873,7 @@ function renderLive() {
 // Series colours validated for dark mode + colour blindness (dataviz validator): you = bronze, reference = blue.
 const ME = '#b08637';
 const REF = '#4a7cc4';
+const OTHER = '#b48ad8'; // second player in a comparison: violet, apart from bronze and blue
 const TIER_CHOICES = [8, 9, 10, 11]; // Oracle, Phantom, Ascendant, Eternus
 const PCTS = [1, 5, 10, 25, 50, 75, 90, 95, 99];
 const METRICS = [
@@ -831,6 +954,7 @@ function radarSvg(axes, refName) {
     ${rings}${spokes}
     <polygon points="${poly(() => R * 0.5)}" fill="${REF}" fill-opacity=".10"/>
     <polygon points="${poly((i) => (R * axes[i].score) / 100)}" fill="${ME}" fill-opacity=".22" stroke="${ME}" stroke-width="2" stroke-linejoin="round"/>
+    ${axes.some((a) => a.score2 != null) ? `<polygon points="${poly((i) => (R * (axes[i].score2 ?? 0)) / 100)}" fill="${OTHER}" fill-opacity=".10" stroke="${OTHER}" stroke-width="2" stroke-linejoin="round"/>` : ''}
     <!-- reference outline drawn over your shape, so it stays visible where you are below it -->
     <polygon points="${poly(() => R * 0.5)}" fill="none" stroke="${REF}" stroke-width="2" stroke-dasharray="5 4"/>
     ${dots}${labels}
@@ -898,20 +1022,31 @@ function renderStats() {
   const periodSeg = [[30, tr('30 j')], [90, tr('90 j')], [0, tr('Tout')]].map(([v, l]) => `<button data-period="${v}" class="${S.ana.period === v ? 'on' : ''}">${l}</button>`).join('');
   const heroOpts = `<option value="0">${tr('Tous les héros')}</option>` + S.heroes.map((h) => `<option value="${h.id}" ${S.ana.hero === h.id ? 'selected' : ''}>${esc(h.name)}</option>`).join('');
   const back = id !== mine ? `<button class="back" data-action="back-stats">← ${tr('Retour au profil')}</button>` : '';
+  // optional second player drawn next to the analysed one ("Comparer avec moi" on a profile)
+  const cw = S.compareWith != null && S.compareWith !== id ? S.compareWith : null;
+  if (cw != null && !S.profiles[cw]) loadProfile(cw);
+  const otherName = cw != null ? S.profiles[cw]?.steam?.personaname || tr('Joueur {id}', { id: cw }) : '';
+  const chip = cw != null
+    ? `<div class="compare-chip"><i class="sw" style="background:${OTHER}"></i>${tr('Comparé à {name}', { name: `<b>${esc(otherName)}</b>` })}
+        <button class="btn ghost sm" data-action="compare-off">${tr('Retirer')}</button></div>`
+    : '';
   const head = `${back}<h1 class="page">${tr('Analyse')}${id !== mine ? ` · ${esc(who)}` : ''}</h1>
     <p class="sub">${id === mine ? tr('Tes statistiques face à celles des joueurs {ref}.', { ref: esc(refName) }) : tr('Ses statistiques face à celles des joueurs {ref}.', { ref: esc(refName) })}</p>
     <div class="card ana-filters">
       <div class="f"><small>${tr('Comparer à')}</small><div class="seg">${tierSeg}</div></div>
       <div class="f"><small>${tr('Période')}</small><div class="seg">${periodSeg}</div></div>
       <div class="f"><small>${tr('Héros')}</small><select class="input" id="ana-hero">${heroOpts}</select></div>
-    </div>`;
+    </div>${chip}`;
 
   const me = useMetrics(metricsUrl(id));
   const ref = useMetrics(metricsUrl(null));
-  if (me.loading || ref.loading) return head + spinner(tr('Calcul des statistiques…'));
-  if (me.err || ref.err) return head + `<div class="error">${esc(me.err || ref.err)}</div>`;
+  const other = cw != null ? useMetrics(metricsUrl(cw)) : null;
+  if (me.loading || ref.loading || other?.loading) return head + spinner(tr('Calcul des statistiques…'));
+  if (me.err || ref.err || other?.err) return head + `<div class="error">${esc(me.err || ref.err || other.err)}</div>`;
   const M = me.data || {};
   const B = ref.data || {};
+  const O = other?.data || null;
+  const scoreOf = (m, v) => (Number.isFinite(v) ? (m.low ? 100 - pctOf(B[m.k], v) : pctOf(B[m.k], v)) : null);
   const avail = METRICS.filter((m) => Number.isFinite(M[m.k]?.avg) && Number.isFinite(B[m.k]?.percentile50));
   if (!avail.length) return head + `<div class="center">${tr('Pas assez de matchs sur cette période.')}</div>`;
 
@@ -921,16 +1056,17 @@ function renderStats() {
     const pc = pctOf(B[m.k], M[m.k].avg);
     const med = B[m.k].percentile50;
     const delta = pct(M[m.k].avg - med, med);
-    return { ...m, label: tr(m.label), me: M[m.k].avg, ref: med, dist: B[m.k], score: m.low ? 100 - pc : pc, good: m.low ? delta <= 0 : delta >= 0, delta };
+    return { ...m, label: tr(m.label), me: M[m.k].avg, ref: med, dist: B[m.k], score: m.low ? 100 - pc : pc, good: m.low ? delta <= 0 : delta >= 0, delta,
+      other: O?.[m.k]?.avg, score2: O ? scoreOf(m, O[m.k]?.avg) : null };
   });
-  const axes = scored.filter((m) => m.axis).map((m) => ({ label: tr(m.axis), score: m.score }));
+  const axes = scored.filter((m) => m.axis).map((m) => ({ label: tr(m.axis), score: m.score, score2: m.score2 }));
   const index = axes.reduce((s, a) => s + a.score, 0) / Math.max(1, axes.length);
   const sorted = [...scored].sort((a, b) => b.score - a.score);
   const row = (m) => `<div class="sw-row"><span>${esc(m.label)}</span><div class="bar"><i style="width:${m.score}%"></i></div><b class="mono">${Math.round(m.score)}</b></div>`;
 
   const top = `<div class="ana-top">
     <div class="card ornate radar-card">
-      <div class="legend"><span><i class="sw" style="background:${ME}"></i>${esc(who)}</span><span><i class="sw dash" style="border-color:${REF}"></i>${tr('Médiane {ref}', { ref: esc(refName) })}</span></div>
+      <div class="legend"><span><i class="sw" style="background:${ME}"></i>${esc(who)}</span>${cw != null ? `<span><i class="sw" style="background:${OTHER}"></i>${esc(otherName)}</span>` : ''}<span><i class="sw dash" style="border-color:${REF}"></i>${tr('Médiane {ref}', { ref: esc(refName) })}</span></div>
       ${radarSvg(axes, refName)}
     </div>
     <div class="card ornate summary">
@@ -954,6 +1090,7 @@ function renderStats() {
         <div class="m-head"><span class="m-label">${esc(m.label)}</span>
           <span class="delta ${m.good ? 'good' : 'bad'}">${m.good ? '▲' : '▼'} ${m.delta > 0 ? '+' : ''}${m.delta.toFixed(0)}%</span></div>
         <div class="m-vals"><span class="m-me"><i class="sw" style="background:${ME}"></i>${fmtM(m, m.me)}</span>
+          ${Number.isFinite(m.other) ? `<span class="m-me" title="${esc(otherName)}"><i class="sw" style="background:${OTHER}"></i>${fmtM(m, m.other)}</span>` : ''}
           <span class="m-ref"><i class="sw dash" style="border-color:${REF}"></i>${esc(refName)} ${fmtM(m, m.ref)}</span></div>
         <div class="strip" title="${tr('Distribution {ref} : 5 % = {p5}, médiane = {p50}, 95 % = {p95}', { ref: esc(refName), p5: fmtM(m, m.dist.percentile5), p50: fmtM(m, m.dist.percentile50), p95: fmtM(m, m.dist.percentile95) })}">
           <span class="range" style="left:${pos(m.dist.percentile5)}%;right:${100 - pos(m.dist.percentile95)}%"></span>
@@ -1008,14 +1145,15 @@ function roleFilter() {
 
 function heroGrid() {
   const q = S.search.trim().toLowerCase();
-  const stat = (h) => S.heroStats[h.id] || { wr: 0, pick: 0 };
+  const all = heroStats();
+  const stat = (h) => all[h.id] || { wr: 0, pick: 0 };
   const list = S.heroes.filter((h) => h.name.toLowerCase().includes(q) && !S.hiddenRoles.has(h.hero_type || ''));
   if (S.sort === 'wr') list.sort((a, b) => stat(b).wr - stat(a).wr);
   if (S.sort === 'pick') list.sort((a, b) => stat(b).pick - stat(a).pick);
   if (!list.length) return `<div class="muted">${tr('Aucun héros trouvé.')}</div>`;
   return list
     .map((h) => {
-      const s = S.heroStats[h.id];
+      const s = all[h.id];
       return `<div class="hero-card" data-hero="${h.id}">
         <img loading="lazy" src="${esc(h.images?.icon_hero_card_webp || h.images?.icon_hero_card)}" alt="">
         <div class="shade"></div>
@@ -1030,20 +1168,80 @@ function heroGrid() {
 
 function renderHeroes() {
   if (!S.heroes.length) return spinner(tr('Chargement des héros…'));
+  loadHeroStats(S.heroTier);
   const seg = [['name', tr('Nom')], ['wr', 'Winrate'], ['pick', tr('Popularité')]]
     .map(([k, l]) => `<button data-sort="${k}" class="${S.sort === k ? 'on' : ''}">${l}</button>`)
     .join('');
+  const tierName = rankTierName(S.heroTier);
+  const st = S.heroStatsBy[S.heroTier];
   return `<h1 class="page">${tr('Héros')}</h1>
-    <p class="sub">${tr('Winrate et taux de pick sur les 14 derniers jours, tous rangs confondus.')}</p>
-    <div class="toolbar"><input class="input" id="search" placeholder="${tr('Rechercher un héros…')}" value="${esc(S.search)}"><div class="seg">${seg}</div></div>
+    <p class="sub">${S.heroTier
+      ? tr('Winrate et taux de pick sur les 14 derniers jours, matchs de niveau {r} et plus.', { r: esc(tierName) })
+      : tr('Winrate et taux de pick sur les 14 derniers jours, tous rangs confondus.')}</p>
+    <div class="toolbar"><input class="input" id="search" placeholder="${tr('Rechercher un héros…')}" value="${esc(S.search)}"><div class="seg">${seg}</div>
+      <div class="seg">${heroTierSeg()}</div>${st?.loading ? '<div class="spinner sm"></div>' : ''}</div>
+    ${st?.err ? `<div class="error">${esc(st.err)}</div>` : ''}
     <div class="role-filter">${roleFilter()}</div>
     <div class="hero-grid" id="grid">${heroGrid()}</div>`;
+}
+
+const rankTierName = (t) => S.ranks.find((x) => x.tier === t)?.name || String(t);
+// rank filter of the Héros pages: all ranks, or the same tiers as the Analyse comparison
+const heroTierSeg = () => [0, ...TIER_CHOICES]
+  .map((t) => `<button data-htier="${t}" class="${S.heroTier === t ? 'on' : ''}">${t ? `${esc(rankTierName(t))}+` : tr('Tous rangs')}</button>`)
+  .join('');
+
+/** Best and worst enemy heroes for hero h (enough matches only, so the win rates mean something). */
+function matchupsHtml(h) {
+  loadCounters(S.heroTier);
+  const c = S.countersBy[S.heroTier];
+  const bar = `<div class="toolbar"><div class="seg">${heroTierSeg()}</div></div>`;
+  if (!c || c.loading) return bar + spinner(tr('Chargement des matchups…'));
+  if (c.err) return bar + `<div class="error">${esc(c.err)}</div>`;
+  const rows = c.data
+    .filter((r) => r.hero_id === h.id && r.matches_played >= 100 && S.heroById[r.enemy_hero_id])
+    .map((r) => ({ id: r.enemy_hero_id, n: r.matches_played, wr: pct(r.wins, r.matches_played) }))
+    .sort((a, b) => b.wr - a.wr);
+  if (rows.length < 4) return bar + `<div class="center">${tr('Pas assez de matchs à ce rang pour ce héros.')}</div>`;
+  const list = (rs) => rs.map((r) => `<div class="pop-row mu" data-hero="${r.id}">
+      <img src="${esc(heroImg(r.id))}" alt=""><div class="nm">${esc(S.heroById[r.id].name)}</div>
+      <div class="pct ${wrClass(r.wr)}">${r.wr.toFixed(1)}%<small>winrate</small></div>
+      <div class="pct">${num(r.n)}<small>${tr('matchs')}</small></div></div>`).join('');
+  const k = Math.min(5, Math.floor(rows.length / 2));
+  return `${bar}<p class="muted mu-note">${tr('Winrate de {hero} face à chaque héros ennemi, 14 derniers jours.', { hero: esc(h.name) })}</p>
+    <div class="phases two">
+      <div class="card ornate phase"><h4>${tr('Fort contre')}</h4>${list(rows.slice(0, k))}</div>
+      <div class="card ornate phase"><h4>${tr('Faible contre')}</h4>${list(rows.slice(-k).reverse())}</div>
+    </div>`;
+}
+
+/** The user's own record on hero h, with a shortcut to the Analyse filtered on it. */
+function myHeroHtml(h) {
+  if (myId() == null) return `<div class="center">${tr('Connecte ton profil pour voir tes stats sur ce héros.')}</div>`;
+  loadMyHeroStats();
+  const c = S.myHeroStats;
+  if (!c || c.loading) return spinner(tr('Chargement de tes stats…'));
+  if (c.err) return `<div class="error">${esc(c.err)}</div>`;
+  const s = c.data[h.id];
+  if (!s?.matches_played) return `<div class="center">${tr('Tu n’as pas encore joué ce héros.')}</div>`;
+  const wr = pct(s.wins, s.matches_played);
+  const tile = (label, value, cls = '') => `<div class="card ornate tile"><div class="label">${label}</div><div class="value ${cls}">${value}</div></div>`;
+  return `<div class="tiles">
+      ${tile(tr('Matchs'), num(s.matches_played))}
+      ${tile('Winrate', `${wr.toFixed(1)}%`, wrClass(wr))}
+      ${tile('KDA', ((s.kills + s.assists) / Math.max(1, s.deaths)).toFixed(2))}
+      ${tile(tr('Âmes / min'), num(s.networth_per_min))}
+      ${tile(tr('Dégâts / min'), num(s.damage_per_min))}
+    </div>
+    <div class="my-hero-foot"><span class="muted">${tr('Précision {a} % · dernière partie {ago}', { a: (s.accuracy * 100).toFixed(1), ago: ago(s.last_played) })}</span>
+      <button class="btn primary sm" data-action="analyze-hero">${tr('Comparer aux hauts rangs')}</button></div>`;
 }
 
 function renderHero() {
   const h = S.heroById[S.hero];
   if (!h) return spinner();
-  const s = S.heroStats[h.id];
+  loadHeroStats(S.heroTier);
+  const s = heroStats()[h.id];
   const img = h.images || {};
   const banner = `<button class="back" data-action="back">← ${tr('Tous les héros')}</button>
     <div class="hero-banner">
@@ -1060,12 +1258,14 @@ function renderHero() {
         </div>
       </div>
     </div>`;
-  const tabs = `<div class="tabs">${[['builds', 'Builds'], ['popular', tr('Objets populaires')]]
+  const tabs = `<div class="tabs">${[['builds', 'Builds'], ['popular', tr('Objets populaires')], ['matchups', 'Matchups'], ['mine', tr('Tes stats')]]
     .map(([k, l]) => `<button data-tab="${k}" class="${S.heroTab === k ? 'on' : ''}">${l}</button>`)
     .join('')}</div>`;
 
   let body = '';
-  if (S.heroTab === 'builds') {
+  if (S.heroTab === 'matchups') body = matchupsHtml(h);
+  else if (S.heroTab === 'mine') body = myHeroHtml(h);
+  else if (S.heroTab === 'builds') {
     loadBuilds(h.id);
     const b = S.builds[h.id];
     if (!b || b.loading) body = spinner(tr('Chargement des builds…'));
@@ -1110,6 +1310,42 @@ function renderHero() {
   return banner + tabs + body;
 }
 
+// ---------- leaderboard ----------
+const REGIONS = [['Europe', 'Europe'], ['NAmerica', 'Amérique du Nord'], ['SAmerica', 'Amérique du Sud'], ['Asia', 'Asie'], ['Oceania', 'Océanie']];
+
+function renderLeaderboard() {
+  const region = S.cfg.region || 'Europe';
+  const hero = S.lbHero || 0;
+  const key = `/leaderboard/${region}${hero ? `/${hero}` : ''}`;
+  const c = (S.lb ??= {})[key];
+  if (!c) {
+    S.lb[key] = { loading: true };
+    api(key)
+      .then((r) => (S.lb[key] = { list: r.entries || [] }))
+      .catch((e) => (S.lb[key] = { err: e.message }))
+      .finally(() => S.view === 'leaderboard' && render());
+  }
+  const regionSeg = REGIONS.map(([k, l]) => `<button data-region="${k}" class="${region === k ? 'on' : ''}">${tr(l)}</button>`).join('');
+  const heroOpts = `<option value="0">${tr('Tous les héros')}</option>` + S.heroes.map((h) => `<option value="${h.id}" ${hero === h.id ? 'selected' : ''}>${esc(h.name)}</option>`).join('');
+  const head = `<h1 class="page">${tr('Classement')}</h1>
+    <p class="sub">${tr('Les meilleurs joueurs classés de chaque région, d’après le classement officiel du jeu.')}</p>
+    <div class="toolbar"><div class="seg">${regionSeg}</div><select class="input" id="lb-hero">${heroOpts}</select></div>`;
+  if (!c || c.loading) return head + spinner(tr('Chargement du classement…'));
+  if (c.err) return head + `<div class="error">${esc(c.err)}</div>`;
+  if (!c.list.length) return head + `<div class="center">${tr('Classement vide pour ce choix.')}</div>`;
+  const rows = c.list.slice(0, 200).map((e) => {
+    // the leaderboard only has the in-game name; a profile link only when it maps to a single account
+    const ids = e.possible_account_ids || [];
+    const name = ids.length === 1
+      ? `<button class="link" data-player="${ids[0]}">${esc(e.account_name)}</button>`
+      : esc(e.account_name);
+    return `<div class="lb-row ${e.rank <= 3 ? 'top' : ''}"><span class="lb-rank mono">#${e.rank}</span>
+      <span class="lb-name">${name}</span>
+      <span class="lb-heroes">${(e.top_hero_ids || []).map((id) => `<img src="${esc(heroImg(id))}" alt="" title="${esc(S.heroById[id]?.name || '')}">`).join('')}</span></div>`;
+  }).join('');
+  return head + `<div class="card ornate lb">${rows}</div>`;
+}
+
 // ---------- patch notes ----------
 // Valve's Steam announcements: the patch notes are tagged "patchnotes", big patches are "... Update".
 const isPatch = (n) => (n.tags || []).includes('patchnotes') || /update/i.test(n.title || '');
@@ -1147,13 +1383,28 @@ async function loadPatches() {
     const latest = list[0];
     if (latest && latest.gid !== S.cfg.patchSeen && S.view !== 'patch') {
       document.getElementById('patch-dot').hidden = false;
-      if (S.cfg.patchSeen) toast(tr('Nouveau patch : {title}', { title: latest.title }));
+      if (S.cfg.patchSeen && S.notifiedPatch !== latest.gid) {
+        S.notifiedPatch = latest.gid; // once per patch and launch
+        toast(tr('Nouveau patch : {title}', { title: latest.title }));
+        // window hidden in the tray or behind the game: Windows notification
+        if (S.cfg.notifyPatch !== false && (document.hidden || !document.hasFocus())) notifyPatch(latest.title);
+      }
     }
   } catch (e) {
     S.patches = { ...S.patches, loading: false, err: String(e) }; // keeps the last list if a refresh fails
     setTimeout(loadPatches, 2 * 60000); // offline at launch, etc.: don't wait 30 min
   }
   if (S.view === 'patch') render();
+}
+
+async function notifyPatch(title) {
+  const N = T.notification;
+  try {
+    if (!(await N.isPermissionGranted()) && (await N.requestPermission()) !== 'granted') return;
+    N.sendNotification({ title: tr('Nouveau patch Deadlock'), body: title });
+  } catch (e) {
+    console.warn('notification', e);
+  }
 }
 
 function renderPatch() {
@@ -1207,7 +1458,7 @@ function openPlayer(id) {
 }
 
 document.addEventListener('click', (e) => {
-  const t = e.target.closest('[data-win],[data-view],[data-hero],[data-player],[data-match],[data-sort],[data-tab],[data-build],[data-patch],[data-tier],[data-period],[data-trend],[data-lang],[data-action]');
+  const t = e.target.closest('[data-win],[data-view],[data-hero],[data-player],[data-match],[data-sort],[data-tab],[data-build],[data-patch],[data-htier],[data-region],[data-tier],[data-period],[data-trend],[data-lang],[data-action]');
   if (!t) return;
   const d = t.dataset;
   if (d.win) return T.window.getCurrentWindow()[d.win]();
@@ -1253,6 +1504,15 @@ document.addEventListener('click', (e) => {
     S.buildIdx = Number(d.build);
     return render();
   }
+  if (d.region) {
+    S.cfg.region = d.region;
+    saveConfig();
+    return render();
+  }
+  if (d.htier) {
+    S.heroTier = Number(d.htier);
+    return render();
+  }
   if (d.patch) {
     S.patchIdx = Number(d.patch);
     render();
@@ -1279,6 +1539,9 @@ document.addEventListener('click', (e) => {
     case 'back-stats': S.view = 'profile'; return render(true);
     case 'live-refresh': return loadLive();
     case 'live-demo': S.liveDemo = !S.liveDemo; S.live = null; return loadLive();
+    case 'compare': S.compareWith = S.viewing; S.anaFor = null; S.view = 'stats'; return render(true);
+    case 'compare-off': S.compareWith = null; return render();
+    case 'analyze-hero': S.ana.hero = S.hero; S.anaFor = null; S.view = 'stats'; return render(true);
     case 'analyze': {
       const id = S.viewing ?? myId();
       S.anaFor = id === myId() ? null : id;
@@ -1322,6 +1585,24 @@ document.addEventListener('change', (e) => {
     saveConfig();
     if (S.cfg.shareMatches) syncAndRefresh();
     return;
+  }
+  if (e.target.id === 'autostart-toggle') {
+    const on = e.target.checked;
+    T.core.invoke('set_autostart', { enabled: on })
+      .then(() => (S.autostart = on))
+      .catch((err) => {
+        e.target.checked = !on;
+        toast(tr('Réglage impossible : {e}', { e: err }));
+      });
+    return;
+  }
+  if (e.target.id === 'tray-toggle' || e.target.id === 'notify-toggle') {
+    S.cfg[e.target.id === 'tray-toggle' ? 'tray' : 'notifyPatch'] = e.target.checked;
+    return saveConfig();
+  }
+  if (e.target.id === 'lb-hero') {
+    S.lbHero = Number(e.target.value);
+    return render();
   }
   if (e.target.id !== 'ana-hero') return;
   S.ana.hero = Number(e.target.value);

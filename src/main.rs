@@ -32,10 +32,96 @@ fn save_config(app: AppHandle, data: String) -> Result<(), String> {
     std::fs::rename(&tmp, &p).map_err(|e| e.to_string())
 }
 
+use std::os::windows::process::CommandExt;
+const CREATE_NO_WINDOW: u32 = 0x0800_0000; // no console flash from a GUI app
+
+fn read_config(app: &AppHandle) -> Value {
+    serde_json::from_str(&load_config(app.clone())).unwrap_or_default()
+}
+
+/// Closing the window keeps the app running in the tray, unless turned off in Réglages.
+fn keeps_in_tray(app: &AppHandle) -> bool {
+    read_config(app)["tray"] != json!(false)
+}
+
+fn show_main(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+    }
+}
+
+/// Tray menu entries, renamed from the page in the app's language.
+struct TrayItems(tauri::menu::MenuItem<tauri::Wry>, tauri::menu::MenuItem<tauri::Wry>);
+
+#[tauri::command]
+fn set_tray_labels(items: tauri::State<TrayItems>, open: String, quit: String) {
+    let _ = items.0.set_text(open);
+    let _ = items.1.set_text(quit);
+}
+
+const RUN_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
+
+fn reg(args: &[&str]) -> bool {
+    std::process::Command::new("reg")
+        .args(args)
+        .creation_flags(CREATE_NO_WINDOW)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Launch at Windows logon: the user's own Run key, nothing system-wide.
+#[tauri::command(async)]
+fn get_autostart() -> bool {
+    reg(&["query", RUN_KEY, "/v", "DeadlockCompanion"])
+}
+
+#[tauri::command(async)]
+fn set_autostart(enabled: bool) -> Result<(), String> {
+    let ok = if enabled {
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        // starts hidden in the tray
+        let value = format!("\"{}\" --minimized", exe.display());
+        reg(&["add", RUN_KEY, "/v", "DeadlockCompanion", "/t", "REG_SZ", "/d", &value, "/f"])
+    } else {
+        reg(&["delete", RUN_KEY, "/v", "DeadlockCompanion", "/f"])
+    };
+    if ok { Ok(()) } else { Err("registre Windows inaccessible".into()) }
+}
+
+#[link(name = "user32")]
+extern "system" {
+    fn FindWindowW(class: *const u16, title: *const u16) -> isize;
+    fn ShowWindow(hwnd: isize, cmd: i32) -> i32;
+    fn SetForegroundWindow(hwnd: isize) -> i32;
+}
+
+/// Already running (maybe hidden in the tray)? Bring that window back: this process then quits.
+/// A restarting instance (watchdog, update) closes its window within a moment, so wait for that first.
+fn focus_running_instance() -> bool {
+    let title: Vec<u16> = "Deadlock Companion\0".encode_utf16().collect();
+    let find = || unsafe { FindWindowW(std::ptr::null(), title.as_ptr()) };
+    for _ in 0..20 {
+        if find() == 0 {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let h = find();
+    if h == 0 {
+        return false;
+    }
+    unsafe {
+        ShowWindow(h, 9); // SW_RESTORE: also shows a hidden window
+        SetForegroundWindow(h);
+    }
+    true
+}
+
 /// Steam install dir from the registry, else the default location.
 fn steam_dir() -> PathBuf {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000; // no console flash from a GUI app
     std::process::Command::new("reg")
         .args(["query", r"HKCU\Software\Valve\Steam", "/v", "SteamPath"])
         .creation_flags(CREATE_NO_WINDOW)
@@ -156,7 +242,8 @@ fn watchdog(app: AppHandle) {
                 continue;
             }
             let Some(win) = app.get_webview_window("main") else { continue };
-            let minimized = win.is_minimized().unwrap_or(false);
+            // minimized or hidden in the tray: come back the same way
+            let minimized = win.is_minimized().unwrap_or(false) || !win.is_visible().unwrap_or(true);
             if let Ok(exe) = std::env::current_exe() {
                 let mut cmd = std::process::Command::new(exe);
                 if minimized {
@@ -172,17 +259,52 @@ fn watchdog(app: AppHandle) {
 }
 
 fn main() {
+    if focus_running_instance() {
+        return;
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
+            use tauri::menu::{Menu, MenuItem};
+            use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+            let open = MenuItem::with_id(app, "open", "Ouvrir", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", "Quitter", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&open, &quit])?;
+            TrayIconBuilder::new()
+                .icon(app.default_window_icon().cloned().ok_or("icône de l'app manquante")?)
+                .tooltip("Deadlock Companion")
+                .menu(&menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, e| match e.id.as_ref() {
+                    "open" => show_main(app),
+                    "quit" => app.exit(0),
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, e| {
+                    if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = e {
+                        show_main(tray.app_handle());
+                    }
+                })
+                .build(app)?;
+            app.manage(TrayItems(open, quit));
+
             if std::env::args().any(|a| a == "--minimized") {
                 if let Some(win) = app.get_webview_window("main") {
-                    let _ = win.minimize();
+                    let _ = if keeps_in_tray(app.handle()) { win.hide() } else { win.minimize() };
                 }
             }
             watchdog(app.handle().clone());
             Ok(())
+        })
+        .on_window_event(|win, ev| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = ev {
+                if keeps_in_tray(win.app_handle()) {
+                    api.prevent_close();
+                    let _ = win.hide();
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             load_config,
@@ -190,6 +312,9 @@ fn main() {
             heartbeat,
             scan_steam_cache,
             patch_notes,
+            set_tray_labels,
+            get_autostart,
+            set_autostart,
             live::current_match,
             live::live_players
         ])
@@ -216,6 +341,19 @@ mod tests {
         let v = rt.block_on(patch_notes()).expect("patch notes");
         let items = v["appnews"]["newsitems"].as_array().expect("newsitems");
         println!("{} annonces, la plus récente : {}", items.len(), items[0]["title"]);
+    }
+
+    /// writes then removes the user's Run key entry: `cargo test autostart_roundtrip -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn autostart_roundtrip() {
+        set_autostart(true).unwrap();
+        let out = std::process::Command::new("reg").args(["query", RUN_KEY, "/v", "DeadlockCompanion"]).output().unwrap();
+        let text = String::from_utf8_lossy(&out.stdout).into_owned();
+        println!("{text}");
+        assert!(text.contains("\" --minimized"), "exe path must be quoted");
+        set_autostart(false).unwrap();
+        assert!(!get_autostart());
     }
 
     #[test]
