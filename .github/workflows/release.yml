@@ -26,6 +26,12 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
+      # setup-protoc only adds protoc to PATH; without PROTOC set, .cargo/config.toml would point to
+      # tools/protoc, which is not in the repository
+      - name: Set PROTOC
+        shell: pwsh
+        run: echo "PROTOC=$((Get-Command protoc).Source)" >> $env:GITHUB_ENV
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
