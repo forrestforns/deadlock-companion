@@ -237,6 +237,16 @@ h1.page { font: 700 28px var(--display); letter-spacing: .08em; margin-bottom: 4
 .seg button { padding: 6px 13px; border-radius: 6px; color: var(--muted); font: 700 11px var(--display); letter-spacing: .1em; text-transform: uppercase; }
 .seg button.on { background: var(--panel-2); color: var(--gold); box-shadow: inset 0 0 0 1px rgba(220,183,108,.3); }
 
+.role-filter { display: flex; flex-wrap: wrap; gap: 8px; margin: -6px 0 18px; }
+.role-chip {
+  display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--line-2); background: rgba(0,0,0,.35); color: var(--muted);
+  font: 700 11px var(--display); letter-spacing: .1em; text-transform: uppercase; transition: border-color .15s, color .15s;
+}
+.role-chip input { accent-color: var(--gold); width: 14px; height: 14px; margin: 0; }
+.role-chip .mono { font-size: 11px; color: var(--dim); letter-spacing: 0; }
+.role-chip.on { color: var(--gold); border-color: rgba(220,183,108,.45); background: linear-gradient(180deg, rgba(220,183,108,.12), rgba(220,183,108,.03)); }
+.role-chip:hover { border-color: var(--gold-2); }
 .hero-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(152px, 1fr)); gap: 14px; }
 .hero-card {
   position: relative; aspect-ratio: 3 / 4; border-radius: 10px; overflow: hidden; cursor: pointer;

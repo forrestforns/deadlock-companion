@@ -22,6 +22,7 @@ const S = {
   live: null, // { loading, err, match, names, ranks, at }
   liveDemo: false, // show the most watched top match instead of mine
   search: '', sort: 'name',
+  hiddenRoles: new Set(), // hero roles unchecked in the Héros filter
 };
 
 // ---------- helpers ----------
@@ -33,7 +34,8 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 // match_result = winning team; player_match_outcome is almost always 0 in real data
 const isWin = (m) => m.match_result === m.player_team;
 const wrClass = (wr) => (wr >= 52 ? 'wr-good' : wr <= 48 ? 'wr-bad' : '');
-const TYPES = { marksman: 'Tireur', mystic: 'Mystique', brawler: 'Bagarreur' };
+const TYPES = { marksman: 'Tireur', mystic: 'Mystique', brawler: 'Bagarreur', assassin: 'Assassin' };
+const roleName = (t) => TYPES[t] || (t ? t[0].toUpperCase() + t.slice(1) : 'Autre');
 const TIERS = ['', 'I', 'II', 'III', 'IV', 'V'];
 // builds made in-game keep the game's untranslated category keys
 const CATS = { EarlyGame: 'Début de partie', MidGame: 'Milieu de partie', LateGame: 'Fin de partie' };
@@ -932,10 +934,22 @@ function renderStats() {
     + `<p class="foot-note">Moyennes par match. Les joueurs ${esc(refName)} sont ceux des matchs dont le rang moyen est ${esc(refName)}, sur ${S.ana.period || 90} jours max. Données deadlock-api.com.</p>`;
 }
 
+// one checkbox per role present in the hero list, with its hero count
+function roleFilter() {
+  const counts = {};
+  for (const h of S.heroes) counts[h.hero_type || ''] = (counts[h.hero_type || ''] || 0) + 1;
+  return Object.keys(counts)
+    .sort((a, b) => roleName(a).localeCompare(roleName(b)))
+    .map((t) => `<label class="role-chip ${S.hiddenRoles.has(t) ? '' : 'on'}">
+      <input type="checkbox" data-role="${esc(t)}" ${S.hiddenRoles.has(t) ? '' : 'checked'}>
+      ${esc(roleName(t))} <span class="mono">${counts[t]}</span></label>`)
+    .join('');
+}
+
 function heroGrid() {
   const q = S.search.trim().toLowerCase();
   const stat = (h) => S.heroStats[h.id] || { wr: 0, pick: 0 };
-  const list = S.heroes.filter((h) => h.name.toLowerCase().includes(q));
+  const list = S.heroes.filter((h) => h.name.toLowerCase().includes(q) && !S.hiddenRoles.has(h.hero_type || ''));
   if (S.sort === 'wr') list.sort((a, b) => stat(b).wr - stat(a).wr);
   if (S.sort === 'pick') list.sort((a, b) => stat(b).pick - stat(a).pick);
   if (!list.length) return '<div class="muted">Aucun héros trouvé.</div>';
@@ -962,6 +976,7 @@ function renderHeroes() {
   return `<h1 class="page">Héros</h1>
     <p class="sub">Winrate et taux de pick sur les 14 derniers jours, tous rangs confondus.</p>
     <div class="toolbar"><input class="input" id="search" placeholder="Rechercher un héros…" value="${esc(S.search)}"><div class="seg">${seg}</div></div>
+    <div class="role-filter">${roleFilter()}</div>
     <div class="hero-grid" id="grid">${heroGrid()}</div>`;
 }
 
@@ -1144,6 +1159,14 @@ document.addEventListener('submit', (e) => {
 });
 
 document.addEventListener('change', (e) => {
+  if (e.target.dataset?.role !== undefined) {
+    const role = e.target.dataset.role;
+    if (e.target.checked) S.hiddenRoles.delete(role);
+    else S.hiddenRoles.add(role);
+    e.target.closest('.role-chip').classList.toggle('on', e.target.checked);
+    document.getElementById('grid').innerHTML = heroGrid();
+    return;
+  }
   if (e.target.id === 'share-toggle') {
     S.cfg.shareMatches = e.target.checked;
     saveConfig();
