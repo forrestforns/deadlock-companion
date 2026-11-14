@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Deadlock Companion",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "identifier": "app.deadlock-companion",
   "build": { "frontendDist": "ui" },
   "app": {
@@ -18,7 +18,7 @@
         "decorations": false,
         "center": true,
         "backgroundColor": "#090c0a",
-        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0 Safari/537.36 Edg/157.0 DeadlockCompanion/0.3.3",
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0 Safari/537.36 Edg/157.0 DeadlockCompanion/0.3.4",
         "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,CalculateNativeWinOcclusion --disable-gpu --disable-backgrounding-occluded-windows --disable-renderer-backgrounding"
       }
     ],

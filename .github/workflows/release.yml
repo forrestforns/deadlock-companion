@@ -95,6 +95,8 @@ jobs:
           $name = "DeadlockCompanion_${v}_x64-setup.exe"
           New-Item -ItemType Directory out | Out-Null
           Copy-Item $exe.FullName "out/$name"
+          # same installer under a fixed name: .../releases/latest/download/DeadlockCompanion-setup.exe always works
+          Copy-Item $exe.FullName "out/DeadlockCompanion-setup.exe"
           $sig = (Get-Content "$($exe.FullName).sig" -Raw).Trim()
           $url = "https://github.com/${{ github.repository }}/releases/download/$env:TAG/$name"
           @{
@@ -111,5 +113,15 @@ jobs:
           tag_name: ${{ env.TAG }}
           target_commitish: ${{ github.sha }}
           name: Deadlock Companion ${{ env.TAG }}
-          body: "Télécharge le fichier *-setup.exe ci-dessous. Si l'app est déjà installée, elle se met à jour toute seule au lancement."
+          body: |
+            ## Installer l'app
+            1. Dans **Assets** ci-dessous, télécharge **`DeadlockCompanion-setup.exe`**.
+               *Ne prends pas « Source code (zip) » ni « Source code (tar.gz) » : c'est le code source, pas l'application.*
+            2. Lance le fichier téléchargé. Si Windows affiche « Windows a protégé votre ordinateur », clique sur
+               **Informations complémentaires** puis **Exécuter quand même** (l'app n'est pas encore signée).
+            3. L'app s'installe et s'ouvre ; tu la retrouves ensuite dans le menu Démarrer.
+
+            Déjà installée ? Rien à faire : elle se met à jour toute seule au lancement.
+
+            Application de fan non officielle, non affiliée à Valve.
           files: out/*

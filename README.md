@@ -18,8 +18,13 @@ statistiques, historique détaillé des parties, builds, analyse face aux meille
 
 ## Installation
 
-Télécharge `Deadlock Companion_x.y.z_x64-setup.exe` dans les [Releases](https://github.com/forrestforns/deadlock-companion/releases/latest) et lance-le.
-L'application n'est pas encore signée : Windows peut afficher « Éditeur inconnu » → *Informations complémentaires* → *Exécuter quand même*.
+### ⬇️ [Télécharger Deadlock Companion pour Windows](https://github.com/forrestforns/deadlock-companion/releases/latest/download/DeadlockCompanion-setup.exe)
+
+1. Clique sur le lien ci-dessus : il télécharge directement l'installateur (`DeadlockCompanion-setup.exe`, environ 2 Mo).
+   *Les archives « Source code » de la page Releases contiennent le code source, pas l'application.*
+2. Lance le fichier. Si Windows affiche « Windows a protégé votre ordinateur » : **Informations complémentaires** → **Exécuter quand même**
+   (l'app n'est pas encore signée).
+3. L'app s'installe et s'ouvre ; elle est ensuite dans le menu Démarrer et se met à jour toute seule.
 
 ### Partie en direct
 
