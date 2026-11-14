@@ -52,12 +52,17 @@ async function api(path) {
 
 /** Accepts a Steam friend code (SteamID3), a SteamID64 or a profile URL containing one. */
 function accountId(input) {
+  // old SteamID2 format STEAM_X:Y:Z -> account id 2*Z + Y
+  const s2 = String(input ?? '').match(/STEAM_\d:([01]):(\d+)/i);
+  if (s2) return 2 * Number(s2[2]) + Number(s2[1]);
   const m = String(input ?? '').match(/\d{5,}/);
   if (!m) return null;
   let n = BigInt(m[0]);
   if (n >= STEAM64) n -= STEAM64;
   return n > 0n && n <= 0xffffffffn ? Number(n) : null;
 }
+console.assert(accountId('STEAM_0:1:14718081') === 29436163 && accountId('76561197989701891') === 29436163
+  && accountId('[U:1:29436163]') === 29436163 && accountId('abc') === null, 'accountId');
 
 function ago(sec) {
   const s = Math.max(0, Math.floor(Date.now() / 1000 - sec));
@@ -610,7 +615,7 @@ async function liveFromBroadcast(mid) {
   if (S.liveUrl?.mid !== mid) S.liveUrl = { mid, since: now, asked: 0 };
   const L = S.liveUrl;
   try {
-    if (!L.url || (L.failing && now - L.asked > 10 * 60000)) {
+    if (!L.asked || ((!L.url || L.failing) && now - L.asked > 10 * 60000)) {
       L.asked = now;
       L.url = (await api(`/matches/${mid}/live/url`)).broadcast_url;
     }
@@ -638,7 +643,7 @@ async function checkCurrentMatch() {
 
 async function loadLive() {
   const id = myId();
-  if (id == null) return;
+  if (id == null || S.live?.loading) return; // one search at a time (live/url quota)
   S.live = { ...S.live, loading: true, err: null };
   if (S.view === 'live') render();
   try {
@@ -1134,10 +1139,8 @@ document.addEventListener('click', (e) => {
   if (d.lang) {
     if (d.lang === LANG()) return;
     S.cfg.lang = d.lang;
-    saveConfig();
-    // reload so every text, number format and the game data (item names...) switch language
-    setTimeout(() => location.reload(), 300);
-    return;
+    // reload (once saved) so every text, number format and the game data (item names...) switch language
+    return T.core.invoke('save_config', { data: JSON.stringify(S.cfg) }).finally(() => location.reload());
   }
   if (d.tier || d.period || d.trend) {
     if (d.tier) S.ana.tier = Number(d.tier);

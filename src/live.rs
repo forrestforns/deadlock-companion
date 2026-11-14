@@ -57,7 +57,7 @@ pub fn match_id_from_log(log: &str) -> Option<u64> {
     online
 }
 
-#[tauri::command]
+#[tauri::command(async)] // file read off the window's thread
 pub fn current_match() -> Option<u64> {
     for dir in game_dirs(&crate::steam_dir()) {
         let path = dir.join("game").join("citadel").join("console.log");

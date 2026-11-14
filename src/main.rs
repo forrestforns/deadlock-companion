@@ -84,7 +84,8 @@ fn parse_salt(buf: &[u8]) -> Option<Value> {
 }
 
 /// Match salts found in Steam's HTTP cache (appcache/httpcache/<xx>/<file>).
-#[tauri::command]
+/// async: thousands of files, kept off the window's thread so the UI never freezes
+#[tauri::command(async)]
 fn scan_steam_cache() -> Vec<Value> {
     let root = steam_dir().join("appcache").join("httpcache");
     let mut found = vec![];
