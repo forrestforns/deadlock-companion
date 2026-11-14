@@ -620,7 +620,7 @@ dependencies = [
 
 [[package]]
 name = "deadlock-companion"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "anyhow",
  "haste",
