@@ -171,7 +171,13 @@ async function boot() {
       .then((n) => n && toast(`${n} partie(s) envoyée(s) à l'API : elles apparaîtront d'ici quelques minutes`))
       .catch((e) => console.warn('ingest', e));
   } else render();
-  setInterval(() => S.view === 'live' && loadLive(), 60000); // live view auto-refresh
+  // live view: every minute, or every 20 s while waiting for the broadcast of a detected match
+  setInterval(() => {
+    if (S.view === 'live' && !S.live?.loading && (S.live?.pending || Date.now() - (S.live?.at || 0) > 55000)) loadLive();
+  }, 20000);
+  // profile banner "partie en cours"
+  checkCurrentMatch();
+  setInterval(checkCurrentMatch, 60000);
 }
 
 // Sends the Deadlock match ids + salts found in Steam's cache (matches opened in the in-game history),
@@ -203,6 +209,7 @@ async function ingestSteamCache() {
 }
 
 async function syncAndRefresh() {
+  checkCurrentMatch();
   try {
     const n = await ingestSteamCache();
     if (n) toast(`${n} partie(s) envoyée(s) à l'API : elles apparaîtront d'ici quelques minutes`);
@@ -297,6 +304,11 @@ function render(animate = false) {
   // ask once about sharing, on the user's own profile
   if (S.view === 'profile' && S.viewing == null && !S.editingId && myId() != null && S.cfg.shareMatches === undefined) {
     html = shareBanner() + html;
+  }
+  if (S.view === 'profile' && S.viewing == null && !S.editingId && S.currentMatch) {
+    html = `<div class="card ornate live-banner"><span class="dot-live"></span>
+      <div><b>Tu es en partie</b><small>Partie n° <span class="mono">${S.currentMatch}</span></small></div>
+      <button class="btn primary sm" data-view="live">Voir les équipes</button></div>` + html;
   }
   view.innerHTML = `<div class="${animate ? 'fade' : ''}">${html}</div>`;
   if (animate) view.scrollTop = 0;
@@ -558,10 +570,8 @@ function renderMatch() {
 
 // ---------- live match ----------
 // Own match: id from the game's console log (-condebug), players from Valve's spectator broadcast.
-// Returns null when there is no current online match or its broadcast can't be read.
-async function liveFromBroadcast() {
-  const mid = await T.core.invoke('current_match').catch(() => null);
-  if (!mid) return null;
+// Returns null while the broadcast can't be read (it only starts a little after the match begins).
+async function liveFromBroadcast(mid) {
   try {
     // live/url is limited to 6 requests/hour per IP without a key: fetch it once per match
     if (S.liveUrl?.mid !== mid) S.liveUrl = { mid, url: (await api(`/matches/${mid}/live/url`)).broadcast_url };
@@ -575,19 +585,31 @@ async function liveFromBroadcast() {
   }
 }
 
-// Fallback: the API only knows matches listed in the in-game "Watch" tab (top ~200).
+/** Current online match id from the game log (null if none); also drives the profile banner. */
+async function checkCurrentMatch() {
+  const mid = await T.core.invoke('current_match').catch(() => null);
+  if (mid !== S.currentMatch) {
+    S.currentMatch = mid;
+    if (S.view === 'profile') render();
+  }
+  return mid;
+}
+
 async function loadLive() {
   const id = myId();
   if (id == null) return;
   S.live = { ...S.live, loading: true, err: null };
   if (S.view === 'live') render();
   try {
-    let match = S.liveDemo ? null : await liveFromBroadcast();
-    if (!match) {
+    const mid = S.liveDemo ? null : await checkCurrentMatch();
+    let match = mid ? await liveFromBroadcast(mid) : null;
+    // no match in the game log: fall back to the API's "Watch" list (or the demo match)
+    if (!mid) {
       const list = await api(S.liveDemo ? '/matches/active' : `/matches/active?account_id=${id}`);
       match = S.liveDemo ? [...list].sort((a, b) => b.spectators - a.spectators)[0] : list[0];
     }
-    const live = { match, at: Date.now(), names: {}, ranks: {} };
+    // match found in the log but its broadcast hasn't started yet: retried automatically
+    const live = { match, pending: !match && mid ? mid : null, at: Date.now(), names: {}, ranks: {} };
     if (match) {
       const ids = match.players.map((p) => p.account_id).filter(Boolean).join(',');
       const [names, ranks] = await Promise.allSettled([api(`/players/steam?account_ids=${ids}`), api(`/players/rank?account_ids=${ids}`)]);
@@ -610,11 +632,19 @@ function renderLive() {
     <div class="live-actions">
       <button class="btn sm" data-action="live-refresh">Actualiser</button>
       <button class="btn sm ghost" data-action="live-demo">${S.liveDemo ? '← Revenir à ma partie' : 'Voir une partie du top en direct'}</button>
-      ${L.at ? `<span class="muted">Mis à jour à ${new Date(L.at).toLocaleTimeString('fr-FR')} · actualisation auto toutes les minutes</span>` : ''}
+      ${L.at ? `<span class="muted">Mis à jour à ${new Date(L.at).toLocaleTimeString('fr-FR')} · actualisation auto ${L.pending ? 'toutes les 20 s' : 'toutes les minutes'}</span>` : ''}
     </div>`;
-  if (L.loading && !L.match) return head + spinner('Recherche de la partie…');
+  if (L.loading && !L.match && !L.pending) return head + spinner('Recherche de la partie…');
   if (L.err) return head + `<div class="error">${esc(L.err)}</div>`;
   const m = L.match;
+  if (!m && L.pending) {
+    return head + `<div class="card ornate onboard live-empty">
+      <div class="spinner" style="margin:0 auto 18px"></div>
+      <h2>Partie détectée</h2>
+      <p>Partie n° <span class="mono">${L.pending}</span>. La diffusion officielle démarre généralement une à deux minutes
+      après le début (choix des héros, chargement). Nouvelle tentative automatique toutes les 20 secondes.</p>
+    </div>`;
+  }
   if (!m) {
     return head + `<div class="card ornate onboard live-empty">
       <h2>Aucune partie en cours trouvée</h2>
