@@ -109,6 +109,10 @@ img { display: block; }
 .nav-settings { margin-top: auto; }
 
 /* ---------- settings / sharing ---------- */
+.version-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 13.5px; }
+.version-num { font-size: 22px; font-weight: 700; color: var(--gold); }
+.gold { color: var(--gold); }
+.btn[disabled] { opacity: .5; cursor: default; }
 .setting { padding: 16px 20px; display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
 .setting p { font-size: 13px; line-height: 1.55; }
 .toggle { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; font-weight: 600; }

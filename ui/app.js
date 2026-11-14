@@ -101,20 +101,39 @@ const avatarHtml = (st, cls) =>
     : `<div class="${cls} avatar-ph">${esc((st?.personaname || '?')[0])}</div>`;
 
 // ---------- data ----------
-// Signed updates published on GitHub Releases, checked once at launch.
+// Signed updates published on GitHub Releases: checked at launch and from Réglages.
+// S.updateCheck = { state: 'checking' | 'uptodate' | 'available' | 'error', version, error, at }
 async function checkUpdate() {
+  S.updateCheck = { state: 'checking' };
+  if (S.view === 'settings') render();
   try {
     const update = await T.updater.check();
-    if (!update) return;
-    S.update = update;
-    const bar = document.getElementById('update-bar');
-    bar.innerHTML = `<span>Nouvelle version <b>${esc(update.version)}</b> disponible</span>
-      <button class="btn primary sm" data-action="do-update">Mettre à jour</button>
-      <button class="btn ghost sm" data-action="skip-update">Plus tard</button>`;
-    bar.hidden = false;
+    S.update = update || null;
+    S.updateCheck = update ? { state: 'available', version: update.version, at: Date.now() } : { state: 'uptodate', at: Date.now() };
+    if (update) {
+      const bar = document.getElementById('update-bar');
+      bar.innerHTML = `<span>Nouvelle version <b>${esc(update.version)}</b> disponible</span>
+        <button class="btn primary sm" data-action="do-update">Mettre à jour</button>
+        <button class="btn ghost sm" data-action="skip-update">Plus tard</button>`;
+      bar.hidden = false;
+    }
   } catch (e) {
     console.warn('update', e); // offline, or no release published yet
+    S.updateCheck = { state: 'error', error: String(e), at: Date.now() };
   }
+  if (S.view === 'settings') render();
+}
+
+function updateStatusHtml() {
+  const u = S.updateCheck;
+  const at = u?.at ? ` <span class="muted">(vérifié à ${new Date(u.at).toLocaleTimeString('fr-FR')})</span>` : '';
+  if (!u || u.state === 'checking') return '<span class="muted">Vérification…</span>';
+  if (u.state === 'uptodate') return `<span class="win">✓ Tu as la dernière version</span>${at}`;
+  if (u.state === 'available') {
+    return `<span class="gold">Nouvelle version <b>${esc(u.version)}</b> disponible</span>${at}
+      <button class="btn primary sm" data-action="do-update">Mettre à jour</button>`;
+  }
+  return `<span class="loss">Impossible de vérifier (connexion ?)</span>${at}`;
 }
 
 async function installUpdate() {
@@ -131,6 +150,7 @@ async function installUpdate() {
 
 async function boot() {
   setTimeout(checkUpdate, 3000);
+  T.app.getVersion().then((v) => (S.version = v)).catch(() => {});
   // tells the Rust side the page is alive (it restarts the app if WebView2 died)
   const beat = () => T.core.invoke('heartbeat').catch(() => {});
   beat();
@@ -347,6 +367,12 @@ function renderSettings() {
     <div class="card setting"><p class="muted">Pour voir ta partie en cours, ajoute <b>-condebug</b> aux options de lancement de Deadlock
       (Steam → clic droit sur Deadlock → Propriétés → Options de lancement). L'app lit alors l'identifiant de la partie dans le journal
       du jeu, puis sa diffusion spectateur officielle. Elle n'affiche que ce que montre le tableau des scores et ne touche jamais au jeu.</p></div>
+    <div class="section-title">Version</div>
+    <div class="card setting version-card">
+      <div class="version-row"><span class="muted">Version installée</span><span class="version-num mono">${esc(S.version || '…')}</span></div>
+      <div class="version-row">${updateStatusHtml()}</div>
+      <button class="btn sm" data-action="check-update" ${S.updateCheck?.state === 'checking' ? 'disabled' : ''}>Vérifier les mises à jour</button>
+    </div>
     <div class="section-title">À propos</div>
     <div class="card setting about"><p>${DISCLAIMER}</p>
       <p class="muted">Données : <b>deadlock-api.com</b> (API communautaire publique). Décodage des diffusions : <b>Haste</b> de blukai (licence MIT).
@@ -1133,6 +1159,7 @@ document.addEventListener('click', (e) => {
     case 'refresh': return S.viewing == null ? syncAndRefresh() : loadProfile(S.viewing, true);
     case 'change-id': S.editingId = true; return render();
     case 'do-update': return installUpdate();
+    case 'check-update': return checkUpdate();
     case 'skip-update': document.getElementById('update-bar').hidden = true; return;
     case 'settings-change-id': S.view = 'profile'; S.viewing = null; S.editingId = true; return render(true);
     case 'share-yes':
