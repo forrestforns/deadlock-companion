@@ -959,7 +959,7 @@ function heroGrid() {
       return `<div class="hero-card" data-hero="${h.id}">
         <img loading="lazy" src="${esc(h.images?.icon_hero_card_webp || h.images?.icon_hero_card)}" alt="">
         <div class="shade"></div>
-        <span class="type-tag">${esc(TYPES[h.hero_type] || h.hero_type || '')}</span>
+        ${h.hero_type ? `<span class="type-tag">${esc(roleName(h.hero_type))}</span>` : ''}
         <div class="info"><div class="name">${esc(h.name)}</div>
           ${s ? `<div class="stats"><span class="${wrClass(s.wr)}">${s.wr.toFixed(1)}% WR</span><span>${s.pick.toFixed(1)}% pick</span></div>` : ''}
         </div>
