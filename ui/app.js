@@ -574,15 +574,24 @@ function renderMatch() {
 // Own match: id from the game's console log (-condebug), players from Valve's spectator broadcast.
 // Returns null while the broadcast can't be read (it only starts a little after the match begins).
 async function liveFromBroadcast(mid) {
+  // live/url asks the API to spectate the match, which is what makes Valve start the broadcast.
+  // It is limited to 6 requests/hour per IP: ask once, then again every 10 min while there's no broadcast.
+  const now = Date.now();
+  if (S.liveUrl?.mid !== mid) S.liveUrl = { mid, since: now, asked: 0 };
+  const L = S.liveUrl;
   try {
-    // live/url is limited to 6 requests/hour per IP without a key: fetch it once per match
-    if (S.liveUrl?.mid !== mid) S.liveUrl = { mid, url: (await api(`/matches/${mid}/live/url`)).broadcast_url };
-    const broadcast_url = S.liveUrl.url;
+    if (!L.url || (L.failing && now - L.asked > 10 * 60000)) {
+      L.asked = now;
+      L.url = (await api(`/matches/${mid}/live/url`)).broadcast_url;
+    }
+    const broadcast_url = L.url;
     const sb = await T.core.invoke('live_players', { url: broadcast_url });
     const souls = [0, 1].map((t) => sb.players.filter((p) => p.team === t).reduce((s, p) => s + p.net_worth, 0));
+    L.failing = false;
     return { match_id: mid, players: sb.players, duration_s: sb.game_time, net_worth_team_0: souls[0], net_worth_team_1: souls[1], scoreboard: true };
   } catch (e) {
     console.warn('broadcast', e);
+    L.failing = true;
     return null;
   }
 }
@@ -640,6 +649,16 @@ function renderLive() {
   if (L.err) return head + `<div class="error">${esc(L.err)}</div>`;
   const m = L.match;
   if (!m && L.pending) {
+    const waited = S.liveUrl?.mid === L.pending ? Date.now() - S.liveUrl.since : 0;
+    // after 3 min without a broadcast, say so plainly instead of "starting…" forever
+    if (waited > 3 * 60000) {
+      return head + `<div class="card ornate onboard live-empty">
+        <h2>Diffusion indisponible</h2>
+        <p>Partie n° <span class="mono">${L.pending}</span> détectée, mais Valve ne diffuse pas cette partie en mode spectateur
+        (ça arrive selon le type de partie ou la charge des serveurs), donc les équipes ne peuvent pas être affichées.
+        L'app continue de réessayer en arrière-plan et redemande la diffusion toutes les 10 minutes.</p>
+      </div>`;
+    }
     return head + `<div class="card ornate onboard live-empty">
       <div class="spinner" style="margin:0 auto 18px"></div>
       <h2>Partie détectée</h2>
