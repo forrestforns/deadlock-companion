@@ -358,12 +358,15 @@ async function loadCounters(tier) {
 
 async function loadMyHeroStats() {
   const id = myId();
-  if (id == null || S.myHeroStats?.id === id) return;
-  const c = (S.myHeroStats = { id, loading: true });
+  const prev = S.myHeroStats?.id === id ? S.myHeroStats : null;
+  // refreshed after 10 min, so today's matches show up without restarting the app
+  if (id == null || prev?.loading || (prev && Date.now() - prev.at < 10 * 60000)) return;
+  const c = (S.myHeroStats = { id, at: Date.now(), loading: true, data: prev?.data });
   try {
     c.data = Object.fromEntries((await api(`/players/${id}/hero-stats`)).map((s) => [s.hero_id, s]));
+    c.err = null;
   } catch (e) {
-    c.err = e.message;
+    c.err = e.message; // keeps the previous data, if any
   }
   c.loading = false;
   rerenderHeroes();
@@ -763,19 +766,27 @@ async function loadLive() {
 
 /** Scouting, once per match: each player's record on the hero they're playing + recent form. */
 async function loadScout(match) {
-  if (S.scout?.mid === match.match_id) return;
-  const sc = (S.scout = { mid: match.match_id, hero: {}, form: {}, done: false });
+  let sc = S.scout;
+  const fresh = sc?.mid !== match.match_id;
+  // same match: only the hero stats are fetched again, if they failed (rate limit at match start...)
+  if (!fresh && (sc.heroOk || sc.busy)) return;
+  if (fresh) sc = S.scout = { mid: match.match_id, hero: {}, form: {}, done: false, heroOk: false };
+  sc.busy = true;
   const ids = match.players.map((p) => p.account_id).filter(Boolean);
   const [hs, ...hist] = await Promise.allSettled([
     api(`/players/hero-stats?account_ids=${ids.join(',')}`),
-    ...ids.map((id) => api(`/players/${id}/match-history`)),
+    ...(fresh ? ids.map((id) => api(`/players/${id}/match-history`)) : []),
   ]);
-  if (hs.status === 'fulfilled') for (const s of hs.value) (sc.hero[s.account_id] ??= {})[s.hero_id] = s;
+  if (hs.status === 'fulfilled') {
+    for (const s of hs.value) (sc.hero[s.account_id] ??= {})[s.hero_id] = s;
+    sc.heroOk = true;
+  }
   hist.forEach((h, i) => {
     if (h.status === 'fulfilled') {
       sc.form[ids[i]] = h.value.filter((x) => x.game_mode === 1).sort((a, b) => b.start_time - a.start_time).slice(0, 20).map(isWin);
     }
   });
+  sc.busy = false;
   sc.done = true;
   if (S.view === 'live') render();
 }
@@ -787,12 +798,16 @@ function scoutHtml(p, mid) {
   const form = sc.form[p.account_id];
   if (!form) return ''; // private / unknown player
   const h = sc.hero[p.account_id]?.[p.hero_id];
-  const hero = h
-    ? tr('{n} parties sur ce héros · {wr} %', { n: num(h.matches_played), wr: `<span class="${wrClass(pct(h.wins, h.matches_played))}">${pct(h.wins, h.matches_played).toFixed(0)}</span>` })
-    : `<span class="gold">${tr('Première partie sur ce héros')}</span>`;
+  const parts = [];
+  // without the hero stats (request failed), say nothing rather than "first match" for everyone
+  if (sc.heroOk) {
+    parts.push(h
+      ? tr('{n} parties sur ce héros · {wr} %', { n: num(h.matches_played), wr: `<span class="${wrClass(pct(h.wins, h.matches_played))}">${pct(h.wins, h.matches_played).toFixed(0)}</span>` })
+      : `<span class="gold">${tr('Première partie sur ce héros')}</span>`);
+  }
   const w = form.filter(Boolean).length;
-  const formTxt = form.length ? ` · ${tr('Forme : {w}V {l}D', { w, l: form.length - w })}` : '';
-  return `<small class="scout">${hero}<span class="${wrClass(pct(w, form.length))}">${formTxt}</span></small>`;
+  if (form.length) parts.push(`<span class="${wrClass(pct(w, form.length))}">${tr('Forme : {w}V {l}D', { w, l: form.length - w })}</span>`);
+  return parts.length ? `<small class="scout">${parts.join(' · ')}</small>` : '';
 }
 
 function renderLive() {
@@ -954,7 +969,7 @@ function radarSvg(axes, refName) {
     ${rings}${spokes}
     <polygon points="${poly(() => R * 0.5)}" fill="${REF}" fill-opacity=".10"/>
     <polygon points="${poly((i) => (R * axes[i].score) / 100)}" fill="${ME}" fill-opacity=".22" stroke="${ME}" stroke-width="2" stroke-linejoin="round"/>
-    ${axes.some((a) => a.score2 != null) ? `<polygon points="${poly((i) => (R * (axes[i].score2 ?? 0)) / 100)}" fill="${OTHER}" fill-opacity=".10" stroke="${OTHER}" stroke-width="2" stroke-linejoin="round"/>` : ''}
+    ${axes.length && axes.every((a) => a.score2 != null) ? `<polygon points="${poly((i) => (R * axes[i].score2) / 100)}" fill="${OTHER}" fill-opacity=".10" stroke="${OTHER}" stroke-width="2" stroke-linejoin="round"/>` : ''}
     <!-- reference outline drawn over your shape, so it stays visible where you are below it -->
     <polygon points="${poly(() => R * 0.5)}" fill="none" stroke="${REF}" stroke-width="2" stroke-dasharray="5 4"/>
     ${dots}${labels}
@@ -1220,8 +1235,8 @@ function myHeroHtml(h) {
   if (myId() == null) return `<div class="center">${tr('Connecte ton profil pour voir tes stats sur ce héros.')}</div>`;
   loadMyHeroStats();
   const c = S.myHeroStats;
-  if (!c || c.loading) return spinner(tr('Chargement de tes stats…'));
-  if (c.err) return `<div class="error">${esc(c.err)}</div>`;
+  if (!c || (c.loading && !c.data)) return spinner(tr('Chargement de tes stats…'));
+  if (!c.data) return `<div class="error">${esc(c.err)}</div>`;
   const s = c.data[h.id];
   if (!s?.matches_played) return `<div class="center">${tr('Tu n’as pas encore joué ce héros.')}</div>`;
   const wr = pct(s.wins, s.matches_played);
@@ -1381,6 +1396,11 @@ async function loadPatches() {
     const list = (r?.appnews?.newsitems || []).filter(isPatch);
     S.patches = { list };
     const latest = list[0];
+    // first launch: the current patch is the starting point, so the next one is notified
+    if (latest && !S.cfg.patchSeen) {
+      S.cfg.patchSeen = latest.gid;
+      saveConfig();
+    }
     if (latest && latest.gid !== S.cfg.patchSeen && S.view !== 'patch') {
       document.getElementById('patch-dot').hidden = false;
       if (S.cfg.patchSeen && S.notifiedPatch !== latest.gid) {

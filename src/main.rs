@@ -91,33 +91,62 @@ fn set_autostart(enabled: bool) -> Result<(), String> {
     if ok { Ok(()) } else { Err("registre Windows inaccessible".into()) }
 }
 
+// Single instance: the running app owns a named Windows event. A second launch signals it (the running
+// app then shows its own window, through Tauri) and quits. Matching a window title instead would also
+// match e.g. an Explorer window on a folder named "Deadlock Companion".
+#[link(name = "kernel32")]
+extern "system" {
+    fn CreateEventW(attributes: *const std::ffi::c_void, manual_reset: i32, initial: i32, name: *const u16) -> isize;
+    fn OpenEventW(access: u32, inherit: i32, name: *const u16) -> isize;
+    fn SetEvent(event: isize) -> i32;
+    fn WaitForSingleObject(handle: isize, ms: u32) -> u32;
+    fn CloseHandle(handle: isize) -> i32;
+}
 #[link(name = "user32")]
 extern "system" {
-    fn FindWindowW(class: *const u16, title: *const u16) -> isize;
-    fn ShowWindow(hwnd: isize, cmd: i32) -> i32;
-    fn SetForegroundWindow(hwnd: isize) -> i32;
+    fn AllowSetForegroundWindow(process_id: u32) -> i32;
 }
 
-/// Already running (maybe hidden in the tray)? Bring that window back: this process then quits.
-/// A restarting instance (watchdog, update) closes its window within a moment, so wait for that first.
-fn focus_running_instance() -> bool {
-    let title: Vec<u16> = "Deadlock Companion\0".encode_utf16().collect();
-    let find = || unsafe { FindWindowW(std::ptr::null(), title.as_ptr()) };
-    for _ in 0..20 {
-        if find() == 0 {
+fn show_event_name() -> Vec<u16> {
+    "Local\\DeadlockCompanion.Show\0".encode_utf16().collect()
+}
+
+/// Already running (maybe hidden in the tray)? Ask it to show its window: this process then quits.
+/// A restarting instance (watchdog, update) is gone within a moment, so wait for that first.
+fn signal_running_instance() -> bool {
+    const EVENT_MODIFY_STATE: u32 = 0x0002;
+    let name = show_event_name();
+    for attempt in 0..20 {
+        let h = unsafe { OpenEventW(EVENT_MODIFY_STATE, 0, name.as_ptr()) };
+        if h == 0 {
             return false;
         }
+        if attempt == 19 {
+            unsafe {
+                AllowSetForegroundWindow(u32::MAX); // let the running app come to the front
+                SetEvent(h);
+                CloseHandle(h);
+            }
+            return true;
+        }
+        unsafe { CloseHandle(h) }; // don't keep it alive while waiting for it to disappear
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
-    let h = find();
+    false
+}
+
+/// Creates the event and shows the window each time a second launch signals it.
+fn listen_for_second_launch(app: AppHandle) {
+    let name = show_event_name();
+    let h = unsafe { CreateEventW(std::ptr::null(), 0, 0, name.as_ptr()) };
     if h == 0 {
-        return false;
+        return;
     }
-    unsafe {
-        ShowWindow(h, 9); // SW_RESTORE: also shows a hidden window
-        SetForegroundWindow(h);
-    }
-    true
+    std::thread::spawn(move || {
+        while unsafe { WaitForSingleObject(h, u32::MAX) } == 0 {
+            show_main(&app);
+        }
+    });
 }
 
 /// Steam install dir from the registry, else the default location.
@@ -259,7 +288,7 @@ fn watchdog(app: AppHandle) {
 }
 
 fn main() {
-    if focus_running_instance() {
+    if signal_running_instance() {
         return;
     }
     tauri::Builder::default()
@@ -289,6 +318,7 @@ fn main() {
                 })
                 .build(app)?;
             app.manage(TrayItems(open, quit));
+            listen_for_second_launch(app.handle().clone());
 
             if std::env::args().any(|a| a == "--minimized") {
                 if let Some(win) = app.get_webview_window("main") {
@@ -341,6 +371,23 @@ mod tests {
         let v = rt.block_on(patch_notes()).expect("patch notes");
         let items = v["appnews"]["newsitems"].as_array().expect("newsitems");
         println!("{} annonces, la plus récente : {}", items.len(), items[0]["title"]);
+    }
+
+    #[test]
+    fn second_launch_signals_the_running_one() {
+        let name: Vec<u16> = "Local\\DeadlockCompanion.Test\0".encode_utf16().collect();
+        const EVENT_MODIFY_STATE: u32 = 0x0002;
+        assert_eq!(unsafe { OpenEventW(EVENT_MODIFY_STATE, 0, name.as_ptr()) }, 0, "no instance yet");
+        let h = unsafe { CreateEventW(std::ptr::null(), 0, 0, name.as_ptr()) };
+        let o = unsafe { OpenEventW(EVENT_MODIFY_STATE, 0, name.as_ptr()) };
+        assert_ne!(o, 0, "running instance found");
+        unsafe { SetEvent(o) };
+        assert_eq!(unsafe { WaitForSingleObject(h, 1000) }, 0, "running instance woken up");
+        unsafe {
+            CloseHandle(o);
+            CloseHandle(h);
+        }
+        assert_eq!(unsafe { OpenEventW(EVENT_MODIFY_STATE, 0, name.as_ptr()) }, 0, "gone with its last handle");
     }
 
     /// writes then removes the user's Run key entry: `cargo test autostart_roundtrip -- --ignored --nocapture`
