@@ -262,7 +262,9 @@ const EN = {
   // patch notes
   'Patchs': 'Patches',
   'Notes de patch': 'Patch notes',
-  'Dernière mise à jour du jeu. Vérifiée automatiquement toutes les 30 minutes.': "The game's latest update. Checked automatically every 30 minutes.",
+  'Le dernier patch du jeu et les précédents. Vérifiés automatiquement toutes les 30 minutes.': "The game's latest patch and the previous ones. Checked automatically every 30 minutes.",
+  'Dernier patch': 'Latest patch',
+  'Nouveau': 'New',
   'Impossible de charger les notes de patch : {e}': 'Could not load the patch notes: {e}',
   'Chargement des notes de patch…': 'Loading patch notes…',
   'Aucune note de patch trouvée.': 'No patch notes found.',

@@ -107,7 +107,7 @@ fn scan_steam_cache() -> Vec<Value> {
 /// Fetched here rather than in the page: no CORS or CSP exception needed for api.steampowered.com.
 #[tauri::command]
 async fn patch_notes() -> Result<Value, String> {
-    let url = "https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/?appid=1422450&count=30&maxlength=0&feeds=steam_community_announcements";
+    let url = "https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/?appid=1422450&count=60&maxlength=0&feeds=steam_community_announcements";
     // full error chain: reqwest's own message ("error sending request") hides the cause
     let chain = |e: reqwest::Error| {
         let mut s = e.to_string();

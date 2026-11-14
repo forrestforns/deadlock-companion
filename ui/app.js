@@ -165,6 +165,7 @@ async function boot() {
   } catch (e) {
     console.warn('config', e);
   }
+  S.prevPatchSeen = S.cfg.patchSeen; // last patch read before this launch
   applyStaticTexts();
   render(true);
 
@@ -1155,22 +1156,32 @@ async function loadPatches() {
 function renderPatch() {
   const P = S.patches || { loading: true };
   const head = `<h1 class="page">${tr('Notes de patch')}</h1>
-    <p class="sub">${tr('Dernière mise à jour du jeu. Vérifiée automatiquement toutes les 30 minutes.')}</p>`;
+    <p class="sub">${tr('Le dernier patch du jeu et les précédents. Vérifiés automatiquement toutes les 30 minutes.')}</p>`;
   if (!P.list) return head + (P.err ? `<div class="error">${tr('Impossible de charger les notes de patch : {e}', { e: esc(P.err) })}</div>` : spinner(tr('Chargement des notes de patch…')));
-  const n = P.list[0];
-  if (!n) return head + `<div class="center">${tr('Aucune note de patch trouvée.')}</div>`;
-  // opened: this patch is now seen
+  if (!P.list.length) return head + `<div class="center">${tr('Aucune note de patch trouvée.')}</div>`;
+  // opened: the latest patch is now seen
   document.getElementById('patch-dot').hidden = true;
-  if (S.cfg.patchSeen !== n.gid) {
-    S.cfg.patchSeen = n.gid;
+  if (S.cfg.patchSeen !== P.list[0].gid) {
+    S.cfg.patchSeen = P.list[0].gid;
     saveConfig();
   }
-  const date = new Date(n.date * 1000).toLocaleDateString(LOCALE(), { day: 'numeric', month: 'long', year: 'numeric' });
-  return head + `<div class="card ornate">
+  // patches released since the last visit before this launch are tagged "Nouveau"
+  const seenDate = P.list.find((x) => x.gid === S.prevPatchSeen)?.date;
+  const day = (n, month) => new Date(n.date * 1000).toLocaleDateString(LOCALE(), { day: 'numeric', month, year: 'numeric' });
+  const idx = Math.min(S.patchIdx || 0, P.list.length - 1);
+  const list = P.list
+    .map((x, i) => `<button class="build-item ${i === idx ? 'on' : ''}" data-patch="${i}">
+      <div class="t">${esc(x.title)}</div>
+      <div class="m"><span>${day(x, 'short')}</span>${i === 0 ? `<span class="gold">${tr('Dernier patch')}</span>` : ''}${seenDate && x.date > seenDate ? `<span class="win">${tr('Nouveau')}</span>` : ''}</div>
+    </button>`)
+    .join('');
+  const n = P.list[idx];
+  return head + `<div class="builds"><div class="build-list patch-list">${list}</div>
+    <div class="card ornate">
       <div class="patch-head"><h2>${esc(n.title)}</h2>
-        <span class="muted">${tr('Publié le {date}', { date })} · ${ago(n.date)} · ${tr('notes officielles de Valve (en anglais)')}</span></div>
+        <span class="muted">${tr('Publié le {date}', { date: day(n, 'long') })} · ${ago(n.date)} · ${tr('notes officielles de Valve (en anglais)')}</span></div>
       <div class="patch-body">${bbcode(n.contents)}</div>
-    </div>`;
+    </div></div>`;
 }
 
 // ---------- events ----------
@@ -1193,7 +1204,7 @@ function openPlayer(id) {
 }
 
 document.addEventListener('click', (e) => {
-  const t = e.target.closest('[data-win],[data-view],[data-hero],[data-player],[data-match],[data-sort],[data-tab],[data-build],[data-tier],[data-period],[data-trend],[data-lang],[data-action]');
+  const t = e.target.closest('[data-win],[data-view],[data-hero],[data-player],[data-match],[data-sort],[data-tab],[data-build],[data-patch],[data-tier],[data-period],[data-trend],[data-lang],[data-action]');
   if (!t) return;
   const d = t.dataset;
   if (d.win) return T.window.getCurrentWindow()[d.win]();
@@ -1238,6 +1249,12 @@ document.addEventListener('click', (e) => {
   if (d.build) {
     S.buildIdx = Number(d.build);
     return render();
+  }
+  if (d.patch) {
+    S.patchIdx = Number(d.patch);
+    render();
+    view.scrollTop = 0;
+    return;
   }
   switch (d.action) {
     case 'refresh': return S.viewing == null ? syncAndRefresh() : loadProfile(S.viewing, true);
