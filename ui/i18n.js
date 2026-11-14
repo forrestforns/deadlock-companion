@@ -258,4 +258,15 @@ const EN = {
   'Chargement des builds…': 'Loading builds…',
   'Aucun build publié pour ce héros.': 'No published builds for this hero.',
   'Ce build ne contient aucun objet.': 'This build has no items.',
+
+  // patch notes
+  'Patchs': 'Patches',
+  'Notes de patch': 'Patch notes',
+  'Dernière mise à jour du jeu. Vérifiée automatiquement toutes les 30 minutes.': "The game's latest update. Checked automatically every 30 minutes.",
+  'Impossible de charger les notes de patch : {e}': 'Could not load the patch notes: {e}',
+  'Chargement des notes de patch…': 'Loading patch notes…',
+  'Aucune note de patch trouvée.': 'No patch notes found.',
+  'Publié le {date}': 'Published {date}',
+  'notes officielles de Valve (en anglais)': "Valve's official notes",
+  'Nouveau patch : {title}': 'New patch: {title}',
 };

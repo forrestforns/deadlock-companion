@@ -103,6 +103,26 @@ fn scan_steam_cache() -> Vec<Value> {
     found
 }
 
+/// Deadlock's official Steam announcements (patch notes included), from Steam's public news API.
+/// Fetched here rather than in the page: no CORS or CSP exception needed for api.steampowered.com.
+#[tauri::command]
+async fn patch_notes() -> Result<Value, String> {
+    let url = "https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/?appid=1422450&count=30&maxlength=0&feeds=steam_community_announcements";
+    // full error chain: reqwest's own message ("error sending request") hides the cause
+    let chain = |e: reqwest::Error| {
+        let mut s = e.to_string();
+        let mut src = std::error::Error::source(&e);
+        while let Some(c) = src {
+            s += &format!(" : {c}");
+            src = c.source();
+        }
+        s
+    };
+    let http = reqwest::Client::builder().timeout(std::time::Duration::from_secs(15)).build().map_err(chain)?;
+    let body = http.get(url).send().await.and_then(|r| r.error_for_status()).map_err(chain)?;
+    serde_json::from_str(&body.text().await.map_err(chain)?).map_err(|e| e.to_string())
+}
+
 /// Last heartbeat from the page (unix seconds). WebView2 can die while the window stays open,
 /// leaving a black window; if the page has gone quiet when the user comes back, restart the app.
 static LAST_BEAT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -169,6 +189,7 @@ fn main() {
             save_config,
             heartbeat,
             scan_steam_cache,
+            patch_notes,
             live::current_match,
             live::live_players
         ])
@@ -185,6 +206,16 @@ mod tests {
         assert!(!page_is_dead(0, 1_000)); // no beat yet: page still loading
         assert!(!page_is_dead(990, 1_000));
         assert!(page_is_dead(970, 1_000));
+    }
+
+    /// network check of the patch notes source: `cargo test patch_notes_now -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn patch_notes_now() {
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let v = rt.block_on(patch_notes()).expect("patch notes");
+        let items = v["appnews"]["newsitems"].as_array().expect("newsitems");
+        println!("{} annonces, la plus récente : {}", items.len(), items[0]["title"]);
     }
 
     #[test]

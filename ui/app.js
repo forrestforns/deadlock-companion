@@ -208,6 +208,9 @@ async function boot() {
   // profile banner "partie en cours"
   checkCurrentMatch();
   setInterval(checkCurrentMatch, 60000);
+  // patch notes: checked at launch and every 30 min, so a new game update shows up by itself
+  loadPatches();
+  setInterval(loadPatches, 30 * 60000);
 }
 
 // Sends the Deadlock match ids + salts found in Steam's cache (matches opened in the in-game history),
@@ -330,7 +333,7 @@ async function loadBuilds(id) {
 
 // ---------- views ----------
 function render(animate = false) {
-  let html = { profile: renderProfile, heroes: renderHeroes, hero: renderHero, match: renderMatch, stats: renderStats, live: renderLive, settings: renderSettings }[S.view]();
+  let html = { profile: renderProfile, heroes: renderHeroes, hero: renderHero, match: renderMatch, stats: renderStats, live: renderLive, patch: renderPatch, settings: renderSettings }[S.view]();
   // ask once about sharing, on the user's own profile
   if (S.view === 'profile' && S.viewing == null && !S.editingId && myId() != null && S.cfg.shareMatches === undefined) {
     html = shareBanner() + html;
@@ -1101,6 +1104,73 @@ function renderHero() {
     body = `<div class="phases">${phase('early_game', tr('Début de partie'))}${phase('mid_game', tr('Milieu de partie'))}${phase('late_game', tr('Fin de partie'))}</div>`;
   }
   return banner + tabs + body;
+}
+
+// ---------- patch notes ----------
+// Valve's Steam announcements: the patch notes are tagged "patchnotes", big patches are "... Update".
+const isPatch = (n) => (n.tags || []).includes('patchnotes') || /update/i.test(n.title || '');
+
+/** Steam BBCode -> HTML. Everything is escaped first, then only known tags become HTML. */
+function bbcode(src) {
+  const img = (u) => (/^https:\/\/[\w.-]+\.steamstatic\.com\/[\w./-]+$/.test(u) ? `<img loading="lazy" src="${u}" alt="">` : '');
+  const TAGS = { p: 'p', b: 'strong', i: 'em', u: 'u', h1: 'h3', h2: 'h3', h3: 'h4', list: 'ul', olist: 'ol' };
+  const BLOCK = '(?:p|h3|h4|ul|ol|li|hr)';
+  return esc(src)
+    .replace(/\{STEAM_CLAN_(?:LOC_)?IMAGE\}/g, 'https://clan.akamai.steamstatic.com/images')
+    .replace(/\[img(?: src=&quot;([^\]]*?)&quot;)?\]([^[]*)\[\/img\]/gi, (_, a, b) => img((a || b).trim()))
+    .replace(/\[(\/?)(p|b|i|u|h1|h2|h3|list|olist)\]/gi, (_, c, t) => `<${c}${TAGS[t.toLowerCase()]}>`)
+    .replace(/\[\*\]/g, '<li>')
+    .replace(/\[hr\](?:\[\/hr\])?/gi, '<hr>')
+    .replace(/\[br\]/gi, '<br>')
+    .replace(/\[\/?(?:url|quote|code|spoiler|strike|noparse|table|tr|td|th|expand|previewyoutube|video)(?:=[^\]]*)?\]/gi, '')
+    .replace(/\n/g, '<br>')
+    .replace(new RegExp(`(<\\/?${BLOCK}>)(?:<br>)+`, 'g'), '$1')
+    .replace(new RegExp(`(?:<br>)+(<\\/?${BLOCK}>)`, 'g'), '$1');
+}
+console.assert(
+  bbcode('[h3][b]Hi[/b][/h3][p]- a <x>\n- b[/p]\n[img]{STEAM_CLAN_IMAGE}/1/a.png[/img][img]javascript:x[/img]')
+    === '<h4><strong>Hi</strong></h4><p>- a &lt;x&gt;<br>- b</p><img loading="lazy" src="https://clan.akamai.steamstatic.com/images/1/a.png" alt="">',
+  'bbcode',
+);
+
+async function loadPatches() {
+  if (S.patches?.loading) return;
+  S.patches = { ...S.patches, loading: true, err: null };
+  try {
+    const r = await T.core.invoke('patch_notes');
+    const list = (r?.appnews?.newsitems || []).filter(isPatch);
+    S.patches = { list };
+    const latest = list[0];
+    if (latest && latest.gid !== S.cfg.patchSeen && S.view !== 'patch') {
+      document.getElementById('patch-dot').hidden = false;
+      if (S.cfg.patchSeen) toast(tr('Nouveau patch : {title}', { title: latest.title }));
+    }
+  } catch (e) {
+    S.patches = { ...S.patches, loading: false, err: String(e) }; // keeps the last list if a refresh fails
+    setTimeout(loadPatches, 2 * 60000); // offline at launch, etc.: don't wait 30 min
+  }
+  if (S.view === 'patch') render();
+}
+
+function renderPatch() {
+  const P = S.patches || { loading: true };
+  const head = `<h1 class="page">${tr('Notes de patch')}</h1>
+    <p class="sub">${tr('Dernière mise à jour du jeu. Vérifiée automatiquement toutes les 30 minutes.')}</p>`;
+  if (!P.list) return head + (P.err ? `<div class="error">${tr('Impossible de charger les notes de patch : {e}', { e: esc(P.err) })}</div>` : spinner(tr('Chargement des notes de patch…')));
+  const n = P.list[0];
+  if (!n) return head + `<div class="center">${tr('Aucune note de patch trouvée.')}</div>`;
+  // opened: this patch is now seen
+  document.getElementById('patch-dot').hidden = true;
+  if (S.cfg.patchSeen !== n.gid) {
+    S.cfg.patchSeen = n.gid;
+    saveConfig();
+  }
+  const date = new Date(n.date * 1000).toLocaleDateString(LOCALE(), { day: 'numeric', month: 'long', year: 'numeric' });
+  return head + `<div class="card ornate">
+      <div class="patch-head"><h2>${esc(n.title)}</h2>
+        <span class="muted">${tr('Publié le {date}', { date })} · ${ago(n.date)} · ${tr('notes officielles de Valve (en anglais)')}</span></div>
+      <div class="patch-body">${bbcode(n.contents)}</div>
+    </div>`;
 }
 
 // ---------- events ----------
