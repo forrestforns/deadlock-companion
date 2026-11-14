@@ -52,8 +52,9 @@ cargo tauri build
 ## Publier une nouvelle version
 
 1. Change le numéro de version dans `Cargo.toml` et `tauri.conf.json`.
-2. Crée un tag et pousse-le : `git tag v0.4.0` puis `git push origin v0.4.0`.
-3. GitHub Actions compile, signe et publie la release ; les utilisateurs reçoivent la mise à jour au lancement suivant.
+2. Fais un commit et envoie-le sur `main` (Push origin).
+3. GitHub Actions voit la nouvelle version, compile, signe et publie la release (étiquette comprise) ;
+   les utilisateurs reçoivent la mise à jour au lancement suivant. Une version déjà publiée est ignorée.
 
 ## Crédits
 

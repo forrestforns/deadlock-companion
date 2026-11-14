@@ -1,4 +1,5 @@
-# Publishes a signed release when a version tag is pushed: git tag v0.4.0 && git push origin v0.4.0
+# Publishes a signed release when the app version (tauri.conf.json) changes on main:
+# bump the version, commit, push. Already-published versions are skipped. Can also be run by hand.
 # Required repository secrets (Settings > Secrets and variables > Actions):
 #   TAURI_SIGNING_PRIVATE_KEY           content of ~/.tauri/deadlock-companion.key
 #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  content of ~/.tauri/deadlock-companion.key.password.txt
@@ -7,15 +8,41 @@ name: release
 
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
+    paths: ["tauri.conf.json", ".github/workflows/release.yml"]
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
+  # version from tauri.conf.json; the release job only runs if that version is not published yet
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+      skip: ${{ steps.v.outputs.skip }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="v$(jq -r .version tauri.conf.json)"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if gh release view "$tag" --repo "${{ github.repository }}" > /dev/null 2>&1; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::$tag est déjà publiée, rien à faire"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
   release:
+    needs: version
+    if: needs.version.outputs.skip == 'false'
     runs-on: windows-latest
     env:
+      TAG: ${{ needs.version.outputs.tag }}
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
     steps:
@@ -63,13 +90,13 @@ jobs:
       - name: Prepare release files
         shell: pwsh
         run: |
-          $v = (Get-Content tauri.conf.json -Raw | ConvertFrom-Json).version
+          $v = $env:TAG.TrimStart('v')
           $exe = Get-ChildItem target/release/bundle/nsis -Filter *-setup.exe | Select-Object -First 1
           $name = "DeadlockCompanion_${v}_x64-setup.exe"
           New-Item -ItemType Directory out | Out-Null
           Copy-Item $exe.FullName "out/$name"
           $sig = (Get-Content "$($exe.FullName).sig" -Raw).Trim()
-          $url = "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/$name"
+          $url = "https://github.com/${{ github.repository }}/releases/download/$env:TAG/$name"
           @{
             version  = $v
             notes    = "Deadlock Companion $v"
@@ -78,8 +105,11 @@ jobs:
           } | ConvertTo-Json -Depth 4 | Set-Content out/latest.json -Encoding utf8NoBOM
           Get-ChildItem out
 
+      # creates the tag on this commit and the release with its files
       - uses: softprops/action-gh-release@v2
         with:
-          name: Deadlock Companion ${{ github.ref_name }}
+          tag_name: ${{ env.TAG }}
+          target_commitish: ${{ github.sha }}
+          name: Deadlock Companion ${{ env.TAG }}
           body: "Télécharge le fichier *-setup.exe ci-dessous. Si l'app est déjà installée, elle se met à jour toute seule au lancement."
           files: out/*
