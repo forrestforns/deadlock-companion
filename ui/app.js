@@ -912,13 +912,16 @@ function renderStats() {
   if (me.err || ref.err) return head + `<div class="error">${esc(me.err || ref.err)}</div>`;
   const M = me.data || {};
   const B = ref.data || {};
-  const avail = METRICS.filter((m) => Number.isFinite(M[m.k]?.avg) && Number.isFinite(B[m.k]?.avg));
+  const avail = METRICS.filter((m) => Number.isFinite(M[m.k]?.avg) && Number.isFinite(B[m.k]?.percentile50));
   if (!avail.length) return head + `<div class="center">${tr('Pas assez de matchs sur cette période.')}</div>`;
 
+  // everything is compared to the reference MEDIAN, like the radar (50 = median): its average can sit
+  // on the other side of you (skewed stats like objective damage) and contradict the radar
   const scored = avail.map((m) => {
     const pc = pctOf(B[m.k], M[m.k].avg);
-    const delta = pct(M[m.k].avg - B[m.k].avg, B[m.k].avg);
-    return { ...m, label: tr(m.label), me: M[m.k].avg, ref: B[m.k].avg, dist: B[m.k], score: m.low ? 100 - pc : pc, good: m.low ? delta <= 0 : delta >= 0, delta };
+    const med = B[m.k].percentile50;
+    const delta = pct(M[m.k].avg - med, med);
+    return { ...m, label: tr(m.label), me: M[m.k].avg, ref: med, dist: B[m.k], score: m.low ? 100 - pc : pc, good: m.low ? delta <= 0 : delta >= 0, delta };
   });
   const axes = scored.filter((m) => m.axis).map((m) => ({ label: tr(m.axis), score: m.score }));
   const index = axes.reduce((s, a) => s + a.score, 0) / Math.max(1, axes.length);
@@ -978,9 +981,9 @@ function renderStats() {
       <div class="trend-head"><div class="seg">${seg}</div>
         <div class="legend"><span><i class="sw" style="background:${ME}"></i>${esc(who)} · ${tr('moyenne sur 10 matchs')}</span>
           <span><i class="dot" style="background:${ME}"></i>${tr('un match')}</span>
-          <span><i class="sw dash" style="border-color:${REF}"></i>${tr('Moyenne {ref}', { ref: esc(refName) })}</span></div></div>
+          <span><i class="sw dash" style="border-color:${REF}"></i>${tr('Médiane {ref}', { ref: esc(refName) })}</span></div></div>
       ${list.length > 1
-        ? `<div class="trend-plot">${trendSvg(list, B[t.ref]?.avg, refName)}<div id="trend-tip" hidden></div></div>`
+        ? `<div class="trend-plot">${trendSvg(list, B[t.ref]?.percentile50, refName)}<div id="trend-tip" hidden></div></div>`
         : `<div class="center">${tr('Pas assez de matchs pour tracer une évolution.')}</div>`}
     </div>`;
   }

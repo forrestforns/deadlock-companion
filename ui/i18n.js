@@ -239,7 +239,6 @@ const EN = {
   'Chargement de l’historique…': 'Loading history…',
   'moyenne sur 10 matchs': '10-match average',
   'un match': 'one match',
-  'Moyenne {ref}': '{ref} average',
   'Pas assez de matchs pour tracer une évolution.': 'Not enough matches to draw a trend.',
   'Détail par statistique': 'Stat breakdown',
   'Moyennes par match. Les joueurs {ref} sont ceux des matchs dont le rang moyen est {ref}, sur {days} jours max. Données deadlock-api.com.':
