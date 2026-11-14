@@ -385,7 +385,7 @@ async function loadBuilds(id) {
 
 // ---------- views ----------
 function render(animate = false) {
-  let html = { profile: renderProfile, heroes: renderHeroes, hero: renderHero, match: renderMatch, stats: renderStats, live: renderLive, leaderboard: renderLeaderboard, patch: renderPatch, settings: renderSettings }[S.view]();
+  let html = { profile: renderProfile, heroes: renderHeroes, hero: renderHero, match: renderMatch, stats: renderStats, live: renderLive, friends: renderFriends, compare: renderCompare, leaderboard: renderLeaderboard, patch: renderPatch, settings: renderSettings }[S.view]();
   // ask once about sharing, on the user's own profile
   if (S.view === 'profile' && S.viewing == null && !S.editingId && myId() != null && S.cfg.shareMatches === undefined) {
     html = shareBanner() + html;
@@ -400,7 +400,8 @@ function render(animate = false) {
   document.querySelectorAll('.nav').forEach((b) =>
     b.classList.toggle('active', b.dataset.view === S.view
       || (S.view === 'hero' && b.dataset.view === 'heroes')
-      || (S.view === 'match' && b.dataset.view === 'profile')));
+      || (S.view === 'match' && b.dataset.view === 'profile')
+      || (S.view === 'compare' && b.dataset.view === 'friends')));
 }
 
 const DISCLAIMER = () => tr('Application de fan non officielle, non affiliée à Valve Corporation. Deadlock et ses visuels sont la propriété de Valve.');
@@ -503,7 +504,10 @@ function renderProfile() {
     ${rankHtml}
     <div class="head-actions">
       <button class="icon-btn" data-action="analyze" title="${tr('Analyser ses stats')}"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg></button>
-      ${!isMine && mine != null ? `<button class="icon-btn" data-action="compare" title="${tr('Comparer avec moi')}"><svg viewBox="0 0 24 24"><circle cx="8" cy="8" r="3"/><circle cx="16" cy="16" r="3"/><path d="M3 21c.5-3 2.5-5 5-5M21 3c-.5 3-2.5 5-5 5"/></svg></button>` : ''}
+      ${!isMine && mine != null ? `<button class="icon-btn" data-action="compare" title="${tr('Comparer avec moi')}"><svg viewBox="0 0 24 24"><circle cx="8" cy="8" r="3"/><circle cx="16" cy="16" r="3"/><path d="M3 21c.5-3 2.5-5 5-5M21 3c-.5 3-2.5 5-5 5"/></svg></button>
+        ${isFriend(id)
+          ? `<button class="icon-btn on" data-action="remove-friend" title="${tr('Retirer des amis')}"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="4"/><path d="M2 21c1-4 4-6 7-6s6 2 7 6M16 11h6"/></svg></button>`
+          : `<button class="icon-btn" data-action="add-friend" title="${tr('Ajouter aux amis')}"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="4"/><path d="M2 21c1-4 4-6 7-6s6 2 7 6M19 8v6M16 11h6"/></svg></button>`}` : ''}
       <button class="icon-btn" data-action="refresh" title="${tr('Actualiser')}"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg></button>
       ${isMine ? `<button class="icon-btn" data-action="change-id" title="${tr('Changer de compte')}"><svg viewBox="0 0 24 24"><path d="M16 3h5v5M21 3l-7 7M8 21H3v-5M3 21l7-7"/></svg></button>` : ''}
     </div>
@@ -921,11 +925,11 @@ function pctOf(dist, v) {
 }
 console.assert(pctOf({ percentile1: 0, percentile5: 1, percentile10: 2, percentile25: 3, percentile50: 4, percentile75: 5, percentile90: 6, percentile95: 7, percentile99: 8 }, 4.5) === 62.5, 'pctOf');
 
-function metricsUrl(id) {
+function metricsUrl(id, heroId = S.ana.hero) { // the Comparaison passes 0: all heroes
   const day = Math.floor(Date.now() / 86400000) * 86400; // day-rounded so the url (cache key) is stable
   // the API defaults to the last 30 days, so "Tout" must send 0 explicitly
   const since = S.ana.period ? day - S.ana.period * 86400 : 0;
-  const hero = S.ana.hero ? `&hero_ids=${S.ana.hero}` : '';
+  const hero = heroId ? `&hero_ids=${heroId}` : '';
   if (id != null) return `/analytics/player-stats/metrics?account_ids=${id}&min_unix_timestamp=${since}${hero}`;
   // reference capped to 90 days: current patches, and keeps the query fast
   return `/analytics/player-stats/metrics?min_average_badge=${S.ana.tier * 10 + 1}&min_unix_timestamp=${since || day - 90 * 86400}${hero}`;
@@ -937,7 +941,7 @@ function useMetrics(url) {
     api(url)
       .then((data) => (S.metrics[url] = { data }))
       .catch((e) => (S.metrics[url] = { err: e.message }))
-      .finally(() => S.view === 'stats' && render());
+      .finally(() => (S.view === 'stats' || S.view === 'compare') && render());
   }
   return S.metrics[url];
 }
@@ -968,9 +972,7 @@ function radarSvg(axes, refName) {
   return `<svg class="radar" viewBox="-40 -6 420 356" role="img" aria-label="${tr('Profil comparé à {ref}', { ref: esc(refName) })}">
     ${rings}${spokes}
     <polygon points="${poly(() => R * 0.5)}" fill="${REF}" fill-opacity=".10"/>
-    <polygon points="${poly((i) => (R * axes[i].score) / 100)}" fill="${ME}" fill-opacity=".22" stroke="${ME}" stroke-width="2" stroke-linejoin="round"/>
-    ${axes.length && axes.every((a) => a.score2 != null) ? `<polygon points="${poly((i) => (R * axes[i].score2) / 100)}" fill="${OTHER}" fill-opacity=".10" stroke="${OTHER}" stroke-width="2" stroke-linejoin="round"/>` : ''}
-    <!-- reference outline drawn over your shape, so it stays visible where you are below it -->
+    <polygon points="${poly((i) => (R * axes[i].score) / 100)}" fill="${ME}" fill-opacity=".22" stroke="${ME}" stroke-width="2" stroke-linejoin="round"/>    <!-- reference outline drawn over your shape, so it stays visible where you are below it -->
     <polygon points="${poly(() => R * 0.5)}" fill="none" stroke="${REF}" stroke-width="2" stroke-dasharray="5 4"/>
     ${dots}${labels}
   </svg>`;
@@ -1020,6 +1022,14 @@ function trendSvg(matches, refVal, refName) {
   </svg>`;
 }
 
+// rank and period filters shared by the Analyse and the Comparaison (S.ana)
+const tierSegHtml = () => TIER_CHOICES.map((t) => {
+  const r = S.ranks.find((x) => x.tier === t);
+  return `<button data-tier="${t}" class="${S.ana.tier === t ? 'on' : ''}">${r?.images?.small_webp || r?.images?.large_webp ? `<img src="${esc(r.images.small_webp || r.images.large_webp)}" alt="">` : ''}${esc(r?.name || t)}</button>`;
+}).join('');
+const periodSegHtml = () => [[30, tr('30 j')], [90, tr('90 j')], [0, tr('Tout')]]
+  .map(([v, l]) => `<button data-period="${v}" class="${S.ana.period === v ? 'on' : ''}">${l}</button>`).join('');
+
 function renderStats() {
   const mine = myId();
   const id = S.anaFor ?? mine;
@@ -1030,38 +1040,24 @@ function renderStats() {
   const tier = S.ranks.find((t) => t.tier === S.ana.tier);
   const refName = `${tier?.name || tr('Haut rang')}+`;
 
-  const tierSeg = TIER_CHOICES.map((t) => {
-    const r = S.ranks.find((x) => x.tier === t);
-    return `<button data-tier="${t}" class="${S.ana.tier === t ? 'on' : ''}">${r?.images?.small_webp || r?.images?.large_webp ? `<img src="${esc(r.images.small_webp || r.images.large_webp)}" alt="">` : ''}${esc(r?.name || t)}</button>`;
-  }).join('');
-  const periodSeg = [[30, tr('30 j')], [90, tr('90 j')], [0, tr('Tout')]].map(([v, l]) => `<button data-period="${v}" class="${S.ana.period === v ? 'on' : ''}">${l}</button>`).join('');
+  const tierSeg = tierSegHtml();
+  const periodSeg = periodSegHtml();
   const heroOpts = `<option value="0">${tr('Tous les héros')}</option>` + S.heroes.map((h) => `<option value="${h.id}" ${S.ana.hero === h.id ? 'selected' : ''}>${esc(h.name)}</option>`).join('');
   const back = id !== mine ? `<button class="back" data-action="back-stats">← ${tr('Retour au profil')}</button>` : '';
-  // optional second player drawn next to the analysed one ("Comparer avec moi" on a profile)
-  const cw = S.compareWith != null && S.compareWith !== id ? S.compareWith : null;
-  if (cw != null && !S.profiles[cw]) loadProfile(cw);
-  const otherName = cw != null ? S.profiles[cw]?.steam?.personaname || tr('Joueur {id}', { id: cw }) : '';
-  const chip = cw != null
-    ? `<div class="compare-chip"><i class="sw" style="background:${OTHER}"></i>${tr('Comparé à {name}', { name: `<b>${esc(otherName)}</b>` })}
-        <button class="btn ghost sm" data-action="compare-off">${tr('Retirer')}</button></div>`
-    : '';
   const head = `${back}<h1 class="page">${tr('Analyse')}${id !== mine ? ` · ${esc(who)}` : ''}</h1>
     <p class="sub">${id === mine ? tr('Tes statistiques face à celles des joueurs {ref}.', { ref: esc(refName) }) : tr('Ses statistiques face à celles des joueurs {ref}.', { ref: esc(refName) })}</p>
     <div class="card ana-filters">
       <div class="f"><small>${tr('Comparer à')}</small><div class="seg">${tierSeg}</div></div>
       <div class="f"><small>${tr('Période')}</small><div class="seg">${periodSeg}</div></div>
       <div class="f"><small>${tr('Héros')}</small><select class="input" id="ana-hero">${heroOpts}</select></div>
-    </div>${chip}`;
+    </div>`;
 
   const me = useMetrics(metricsUrl(id));
   const ref = useMetrics(metricsUrl(null));
-  const other = cw != null ? useMetrics(metricsUrl(cw)) : null;
-  if (me.loading || ref.loading || other?.loading) return head + spinner(tr('Calcul des statistiques…'));
-  if (me.err || ref.err || other?.err) return head + `<div class="error">${esc(me.err || ref.err || other.err)}</div>`;
+  if (me.loading || ref.loading) return head + spinner(tr('Calcul des statistiques…'));
+  if (me.err || ref.err) return head + `<div class="error">${esc(me.err || ref.err)}</div>`;
   const M = me.data || {};
   const B = ref.data || {};
-  const O = other?.data || null;
-  const scoreOf = (m, v) => (Number.isFinite(v) ? (m.low ? 100 - pctOf(B[m.k], v) : pctOf(B[m.k], v)) : null);
   const avail = METRICS.filter((m) => Number.isFinite(M[m.k]?.avg) && Number.isFinite(B[m.k]?.percentile50));
   if (!avail.length) return head + `<div class="center">${tr('Pas assez de matchs sur cette période.')}</div>`;
 
@@ -1071,17 +1067,16 @@ function renderStats() {
     const pc = pctOf(B[m.k], M[m.k].avg);
     const med = B[m.k].percentile50;
     const delta = pct(M[m.k].avg - med, med);
-    return { ...m, label: tr(m.label), me: M[m.k].avg, ref: med, dist: B[m.k], score: m.low ? 100 - pc : pc, good: m.low ? delta <= 0 : delta >= 0, delta,
-      other: O?.[m.k]?.avg, score2: O ? scoreOf(m, O[m.k]?.avg) : null };
+    return { ...m, label: tr(m.label), me: M[m.k].avg, ref: med, dist: B[m.k], score: m.low ? 100 - pc : pc, good: m.low ? delta <= 0 : delta >= 0, delta };
   });
-  const axes = scored.filter((m) => m.axis).map((m) => ({ label: tr(m.axis), score: m.score, score2: m.score2 }));
+  const axes = scored.filter((m) => m.axis).map((m) => ({ label: tr(m.axis), score: m.score }));
   const index = axes.reduce((s, a) => s + a.score, 0) / Math.max(1, axes.length);
   const sorted = [...scored].sort((a, b) => b.score - a.score);
   const row = (m) => `<div class="sw-row"><span>${esc(m.label)}</span><div class="bar"><i style="width:${m.score}%"></i></div><b class="mono">${Math.round(m.score)}</b></div>`;
 
   const top = `<div class="ana-top">
     <div class="card ornate radar-card">
-      <div class="legend"><span><i class="sw" style="background:${ME}"></i>${esc(who)}</span>${cw != null ? `<span><i class="sw" style="background:${OTHER}"></i>${esc(otherName)}</span>` : ''}<span><i class="sw dash" style="border-color:${REF}"></i>${tr('Médiane {ref}', { ref: esc(refName) })}</span></div>
+      <div class="legend"><span><i class="sw" style="background:${ME}"></i>${esc(who)}</span><span><i class="sw dash" style="border-color:${REF}"></i>${tr('Médiane {ref}', { ref: esc(refName) })}</span></div>
       ${radarSvg(axes, refName)}
     </div>
     <div class="card ornate summary">
@@ -1104,9 +1099,7 @@ function renderStats() {
       return `<div class="card metric">
         <div class="m-head"><span class="m-label">${esc(m.label)}</span>
           <span class="delta ${m.good ? 'good' : 'bad'}">${m.good ? '▲' : '▼'} ${m.delta > 0 ? '+' : ''}${m.delta.toFixed(0)}%</span></div>
-        <div class="m-vals"><span class="m-me"><i class="sw" style="background:${ME}"></i>${fmtM(m, m.me)}</span>
-          ${Number.isFinite(m.other) ? `<span class="m-me" title="${esc(otherName)}"><i class="sw" style="background:${OTHER}"></i>${fmtM(m, m.other)}</span>` : ''}
-          <span class="m-ref"><i class="sw dash" style="border-color:${REF}"></i>${esc(refName)} ${fmtM(m, m.ref)}</span></div>
+        <div class="m-vals"><span class="m-me"><i class="sw" style="background:${ME}"></i>${fmtM(m, m.me)}</span>          <span class="m-ref"><i class="sw dash" style="border-color:${REF}"></i>${esc(refName)} ${fmtM(m, m.ref)}</span></div>
         <div class="strip" title="${tr('Distribution {ref} : 5 % = {p5}, médiane = {p50}, 95 % = {p95}', { ref: esc(refName), p5: fmtM(m, m.dist.percentile5), p50: fmtM(m, m.dist.percentile50), p95: fmtM(m, m.dist.percentile95) })}">
           <span class="range" style="left:${pos(m.dist.percentile5)}%;right:${100 - pos(m.dist.percentile95)}%"></span>
           <span class="iqr" style="left:${pos(m.dist.percentile25)}%;right:${100 - pos(m.dist.percentile75)}%"></span>
@@ -1323,6 +1316,213 @@ function renderHero() {
     body = `<div class="phases">${phase('early_game', tr('Début de partie'))}${phase('mid_game', tr('Milieu de partie'))}${phase('late_game', tr('Fin de partie'))}</div>`;
   }
   return banner + tabs + body;
+}
+
+// ---------- friends ----------
+const friends = () => S.cfg.friends || [];
+const isFriend = (id) => friends().includes(id);
+
+function addFriend(id) {
+  if (!id || id === myId()) return;
+  if (!isFriend(id)) {
+    S.cfg.friends = [...friends(), id];
+    saveConfig();
+    toast(tr('Ajouté à tes amis'));
+  }
+  render();
+}
+
+function removeFriend(id) {
+  S.cfg.friends = friends().filter((f) => f !== id);
+  saveConfig();
+  render();
+}
+
+/** Names, avatars and ranks of the friends: two requests for the whole list. */
+async function loadFriendInfo(ids) {
+  const key = ids.join(',');
+  if (!key || S.friendInfo?.key === key) return;
+  const fi = (S.friendInfo = { key, names: {}, ranks: {} });
+  const [names, ranks] = await Promise.allSettled([api(`/players/steam?account_ids=${key}`), api(`/players/rank?account_ids=${key}`)]);
+  if (names.status === 'fulfilled') for (const s of [].concat(names.value)) fi.names[s.account_id] = s;
+  if (ranks.status === 'fulfilled') for (const r of [].concat(ranks.value)) fi.ranks[r.account_id] = r.badge;
+  if (S.view === 'friends' || S.view === 'compare') render();
+}
+
+function renderFriends() {
+  const me = myId();
+  if (me == null) return onboarding();
+  const ids = friends();
+  loadFriendInfo(ids);
+  const fi = S.friendInfo?.key === ids.join(',') ? S.friendInfo : { names: {}, ranks: {} };
+  const mp = S.profiles[me];
+  if (!mp) loadProfile(me);
+  const head = `<h1 class="page">${tr('Amis')}</h1>
+    <p class="sub">${tr('Ta liste d’amis, pour suivre leur rang et comparer vos stats.')}</p>
+    <form class="toolbar" data-form="friend"><input class="input" name="sid" placeholder="${tr('Code ami Steam, SteamID64 ou lien de profil')}">
+      <button class="btn primary">${tr('Ajouter')}</button></form>`;
+  const cards = ids.length
+    ? `<div class="friends">${ids.map((id) => {
+        const s = fi.names[id];
+        return `<div class="card ornate friend">${avatarHtml(s, 'mate-av')}
+          <div class="fr-main"><button class="link fr-name" data-player="${id}">${esc(s?.personaname || tr('Joueur {id}', { id }))}</button>
+            ${badgeHtml(fi.ranks[id]) || `<span class="badge">${tr('Non classé')}</span>`}</div>
+          <div class="fr-actions"><button class="btn primary sm" data-action="compare-friend" data-id="${id}">${tr('Comparer')}</button>
+            <button class="btn ghost sm" data-action="remove-friend" data-id="${id}" title="${tr('Retirer des amis')}">✕</button></div>
+        </div>`;
+      }).join('')}</div>`
+    : `<div class="center">${tr('Pas encore d’amis. Ajoute-les avec leur code ami, depuis leur profil, ou parmi les suggestions ci-dessous.')}</div>`;
+  const sugg = (mp?.mates || []).filter((m) => !ids.includes(m.mate_id)).slice(0, 8);
+  const suggHtml = sugg.length
+    ? `<div class="section-title">${tr('Suggestions : tes coéquipiers réguliers')}</div><div class="friends">${sugg.map((m) => {
+        const s = mp.names[m.mate_id];
+        return `<div class="card friend">${avatarHtml(s, 'mate-av')}
+          <div class="fr-main"><button class="link fr-name" data-player="${m.mate_id}">${esc(s?.personaname || tr('Joueur {id}', { id: m.mate_id }))}</button>
+            <small class="muted">${tr('{n} matchs ensemble', { n: m.matches_played })}</small></div>
+          <button class="btn sm" data-action="add-friend" data-id="${m.mate_id}">+ ${tr('Ajouter')}</button></div>`;
+      }).join('')}</div>`
+    : '';
+  return head + cards + suggHtml;
+}
+
+// ---------- comparison (head to head, Leetify-like) ----------
+// metric groups shown as sections; each one is scored like its Analyse radar axis
+const GROUPS = [
+  { axis: 'Combat', keys: ['kda', 'kd', 'kills_plus_assists'] },
+  { axis: 'Survie', keys: ['deaths', 'healing_per_min'] },
+  { axis: 'Dégâts', keys: ['player_damage_per_min'] },
+  { axis: 'Précision', keys: ['accuracy', 'crit_shot_rate'] },
+  { axis: 'Économie', keys: ['net_worth_per_min', 'last_hits', 'denies'] },
+  { axis: 'Objectifs', keys: ['boss_damage_per_min'] },
+];
+const TROPHY = '<svg class="trophy" viewBox="0 0 24 24"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0z"/><path d="M7 6H4a3 3 0 0 0 3 4M17 6h3a3 3 0 0 1-3 4"/></svg>';
+
+function openCompare(a, b) {
+  S.cmp = { a, b };
+  S.view = 'compare';
+  render(true);
+}
+
+/** One side: facts from the match history + metric scores (0-100) among the chosen rank, like the Analyse. */
+function cmpSide(id, B) {
+  const p = S.profiles[id];
+  if (!p) loadProfile(id);
+  const met = useMetrics(metricsUrl(id, 0));
+  if (p?.err) return { err: p.err };
+  if (met.err) return { err: met.err };
+  if (!p?.matches || met.loading) return { loading: true };
+  const since = S.ana.period ? Date.now() / 1000 - S.ana.period * 86400 : 0;
+  const nm = p.matches.filter((x) => x.game_mode === 1 && x.start_time >= since);
+  let run = 0, streak = 0;
+  for (const x of [...nm].reverse()) { // oldest first
+    run = isWin(x) ? run + 1 : 0;
+    streak = Math.max(streak, run);
+  }
+  const M = met.data || {};
+  const score = {};
+  for (const m of METRICS) {
+    if (!Number.isFinite(M[m.k]?.avg) || !Number.isFinite(B[m.k]?.percentile50)) continue;
+    const pc = pctOf(B[m.k], M[m.k].avg);
+    score[m.k] = m.low ? 100 - pc : pc;
+  }
+  const axes = METRICS.filter((m) => m.axis && score[m.k] != null);
+  return {
+    id, M, score, steam: p.steam,
+    name: p.steam?.personaname || tr('Joueur {id}', { id }),
+    matches: nm.length, wins: nm.filter(isWin).length, streak,
+    maxKills: Math.max(0, ...nm.map((x) => x.player_kills)),
+    index: axes.reduce((s, m) => s + score[m.k], 0) / Math.max(1, axes.length),
+    top: METRICS.filter((m) => score[m.k] != null).sort((x, y) => score[y.k] - score[x.k]).slice(0, 2),
+  };
+}
+
+function cmpCard(P, Q, color) {
+  const wr = pct(P.wins, P.matches);
+  const attrs = GROUPS.map((g) => {
+    const k = METRICS.find((m) => m.axis === g.axis).k;
+    const s = P.score[k], o = Q.score[k];
+    if (s == null) return '';
+    return `<div class="cmp-attr"><span>${tr(g.axis)}</span><b class="mono">${o == null || s > o ? TROPHY : ''}${Math.round(s)}</b>
+      <div class="bar"><i style="width:${s}%"></i></div></div>`;
+  }).join('');
+  return `<div class="card ornate cmp-card" style="--pc:${color}">
+    <div class="cmp-id">${avatarHtml(P.steam, 'mate-av')}<button class="link" data-player="${P.id}">${esc(P.name)}</button></div>
+    <div class="cmp-facts">
+      <div><small>${tr('Matchs joués')}</small><b class="mono">${num(P.matches)}</b></div>
+      <div><small>${tr('Record de kills')}</small><b class="mono">${P.maxKills}</b></div>
+      <div><small>${tr('Plus longue série de victoires')}</small><b class="mono">${P.streak}</b></div>
+    </div>
+    <div class="cmp-tiles">
+      <div class="cmp-tile"><small>${tr('Indice de performance')}</small><div class="meter"><i style="width:${P.index}%"></i><b class="mono">${Math.round(P.index)}</b></div></div>
+      <div class="cmp-tile"><small>Winrate</small><div class="meter ${wr >= 50 ? 'good' : 'bad'}"><i style="width:${wr}%"></i><b class="mono">${wr.toFixed(1)}%</b></div></div>
+      <div class="cmp-tile"><small>${tr('Points forts')}</small><div class="cmp-top">${P.top.map((m) => `<span>${esc(tr(m.label))}</span>`).join('')}</div></div>
+    </div>
+    <div class="cmp-attrs"><small>${tr('Attributs')}</small>${attrs}</div>
+  </div>`;
+}
+
+function cmpVerdict(d, name) {
+  const ad = Math.abs(d);
+  if (ad < 5) return tr('Égalité sur ce point');
+  if (ad < 15) return tr('Léger avantage pour {name}', { name });
+  if (ad < 30) return tr('Avantage net pour {name}', { name });
+  return tr('Gros avantage pour {name}', { name });
+}
+
+function cmpGroup(g, A, Z) {
+  const k = METRICS.find((m) => m.axis === g.axis).k;
+  const sa = A.score[k], sz = Z.score[k];
+  if (sa == null || sz == null) return '';
+  const d = sa - sz;
+  const rows = g.keys
+    .map((key) => METRICS.find((m) => m.k === key))
+    .filter((m) => Number.isFinite(A.M[m.k]?.avg) && Number.isFinite(Z.M[m.k]?.avg))
+    .map((m) => {
+      const va = A.M[m.k].avg, vz = Z.M[m.k].avg, max = Math.max(va, vz) || 1;
+      const aBest = m.low ? va < vz : va > vz, zBest = m.low ? vz < va : vz > va;
+      return `<div class="cmp-row">
+        <div class="l"><span class="mono ${aBest ? 'on' : ''}">${fmtM(m, va)}</span><i class="${aBest ? 'on' : ''}" style="width:${(85 * va) / max}%"></i></div>
+        <div class="c">${esc(tr(m.label))}${m.low ? ` <small>(${tr('moins = mieux')})</small>` : ''}</div>
+        <div class="r"><span class="mono ${zBest ? 'on' : ''}">${fmtM(m, vz)}</span><i class="${zBest ? 'on' : ''}" style="width:${(85 * vz) / max}%"></i></div>
+      </div>`;
+    })
+    .join('');
+  return `<div class="card ornate cmp-cat">
+    <h3>${tr(g.axis)}</h3><p class="muted">${cmpVerdict(d, esc(d >= 0 ? A.name : Z.name))}</p>
+    <div class="cmp-duel"><span class="pa">${esc(A.name)} ${d > 0 ? TROPHY : ''}<b class="mono">${Math.round(sa)}</b></span>
+      <div class="duel-bar"><i class="a" style="width:${pct(sa, sa + sz)}%"></i><i class="b" style="width:${pct(sz, sa + sz)}%"></i></div>
+      <span class="pb"><b class="mono">${Math.round(sz)}</b>${d < 0 ? TROPHY : ''} ${esc(Z.name)}</span></div>
+    ${rows}</div>`;
+}
+
+function renderCompare() {
+  const me = myId();
+  if (me == null) return onboarding();
+  const a = S.cmp?.a ?? me;
+  const b = S.cmp?.b ?? friends()[0];
+  loadFriendInfo(friends());
+  const nameOf = (id) => (id === me ? tr('Toi') : S.friendInfo?.names?.[id]?.personaname || S.profiles[id]?.steam?.personaname || tr('Joueur {id}', { id }));
+  const choices = [...new Set([me, ...friends(), a, b].filter((x) => x != null))];
+  const sel = (key, cur) => `<select class="input" id="cmp-${key}">${choices.map((id) => `<option value="${id}" ${id === cur ? 'selected' : ''}>${esc(nameOf(id))}</option>`).join('')}</select>`;
+  const refName = `${rankTierName(S.ana.tier)}+`;
+  const head = `<button class="back" data-view="friends">← ${tr('Amis')}</button>
+    <h1 class="page">${tr('Comparaison')}</h1>
+    <p class="sub">${tr('Chaque note va de 0 à 100 : la position du joueur parmi les joueurs {ref}, comme dans l’Analyse.', { ref: esc(refName) })}</p>
+    <div class="card ana-filters">
+      <div class="f"><small>${tr('Joueurs')}</small><div class="cmp-sel">${sel('a', a)}<span class="muted">vs</span>${sel('b', b)}</div></div>
+      <div class="f"><small>${tr('Comparer à')}</small><div class="seg">${tierSegHtml()}</div></div>
+      <div class="f"><small>${tr('Période')}</small><div class="seg">${periodSegHtml()}</div></div>
+    </div>`;
+  if (b == null) return head + `<div class="center">${tr('Ajoute un ami pour comparer vos stats.')}</div>`;
+  if (a === b) return head + `<div class="center">${tr('Choisis deux joueurs différents.')}</div>`;
+  const ref = useMetrics(metricsUrl(null, 0));
+  if (ref.err) return head + `<div class="error">${esc(ref.err)}</div>`;
+  if (ref.loading) return head + spinner(tr('Calcul des statistiques…'));
+  const A = cmpSide(a, ref.data || {}), Z = cmpSide(b, ref.data || {});
+  if (A.err || Z.err) return head + `<div class="error">${esc(A.err || Z.err)}</div>`;
+  if (A.loading || Z.loading) return head + spinner(tr('Calcul des statistiques…'));
+  return head + `<div class="cmp-cols">${cmpCard(A, Z, ME)}${cmpCard(Z, A, OTHER)}</div>
+    <div class="cmp-cats" style="--pa:${ME};--pb:${OTHER}">${GROUPS.map((g) => cmpGroup(g, A, Z)).join('')}</div>`;
 }
 
 // ---------- leaderboard ----------
@@ -1559,8 +1759,10 @@ document.addEventListener('click', (e) => {
     case 'back-stats': S.view = 'profile'; return render(true);
     case 'live-refresh': return loadLive();
     case 'live-demo': S.liveDemo = !S.liveDemo; S.live = null; return loadLive();
-    case 'compare': S.compareWith = S.viewing; S.anaFor = null; S.view = 'stats'; return render(true);
-    case 'compare-off': S.compareWith = null; return render();
+    case 'compare': return openCompare(myId(), S.viewing);
+    case 'compare-friend': return openCompare(myId(), Number(d.id));
+    case 'add-friend': return addFriend(Number(d.id ?? S.viewing));
+    case 'remove-friend': return removeFriend(Number(d.id ?? S.viewing));
     case 'analyze-hero': S.ana.hero = S.hero; S.anaFor = null; S.view = 'stats'; return render(true);
     case 'analyze': {
       const id = S.viewing ?? myId();
@@ -1578,6 +1780,12 @@ document.addEventListener('click', (e) => {
 });
 
 document.addEventListener('submit', (e) => {
+  if (e.target.dataset.form === 'friend') {
+    e.preventDefault();
+    const id = accountId(e.target.sid.value.trim());
+    if (id == null) return toast(tr('Steam ID invalide'));
+    return addFriend(id);
+  }
   if (e.target.dataset.form !== 'steam') return;
   e.preventDefault();
   const v = e.target.sid.value.trim();
@@ -1619,6 +1827,10 @@ document.addEventListener('change', (e) => {
   if (e.target.id === 'tray-toggle' || e.target.id === 'notify-toggle') {
     S.cfg[e.target.id === 'tray-toggle' ? 'tray' : 'notifyPatch'] = e.target.checked;
     return saveConfig();
+  }
+  if (e.target.id === 'cmp-a' || e.target.id === 'cmp-b') {
+    S.cmp = { a: S.cmp?.a ?? myId(), b: S.cmp?.b ?? friends()[0], [e.target.id.slice(4)]: Number(e.target.value) };
+    return render();
   }
   if (e.target.id === 'lb-hero') {
     S.lbHero = Number(e.target.value);
