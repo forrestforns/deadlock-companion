@@ -818,7 +818,7 @@ function radarSvg(axes, refName) {
       const [x, y] = pt(i, R + 26);
       const anchor = Math.abs(x - C) < 8 ? 'middle' : x > C ? 'start' : 'end';
       return `<text x="${x}" y="${y}" text-anchor="${anchor}" class="lbl">${esc(a.label)}</text>
-        <text x="${x}" y="${y + 14}" text-anchor="${anchor}" class="val">${Math.round(a.score)}</text>`;
+        <text x="${x}" y="${y + 14}" text-anchor="${anchor}" class="val ${a.score >= 50 ? 'up' : 'down'}">${Math.round(a.score)} ${a.score >= 50 ? '▲' : '▼'}</text>`;
     })
     .join('');
   const dots = axes

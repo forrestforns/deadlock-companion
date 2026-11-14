@@ -440,6 +440,9 @@ h1.page { font: 700 28px var(--display); letter-spacing: .08em; margin-bottom: 4
 .radar .ring { fill: none; stroke: var(--line-2); stroke-width: 1; }
 .radar .lbl { fill: var(--text); font: 700 11.5px var(--display); letter-spacing: .08em; }
 .radar .val { fill: var(--muted); font: 600 11px var(--mono); }
+/* above / below the reference median: a 1-point gap is invisible on the shape itself */
+.radar .val.up { fill: var(--win); }
+.radar .val.down { fill: var(--loss); }
 .legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
 .sw { width: 14px; height: 4px; border-radius: 2px; display: inline-block; }
