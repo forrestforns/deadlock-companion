@@ -1,0 +1,55 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Deadlock Companion",
+  "version": "0.3.0",
+  "identifier": "app.deadlock-companion",
+  "build": { "frontendDist": "ui" },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "url": "index.html",
+        "title": "Deadlock Companion",
+        "width": 1240,
+        "height": 800,
+        "minWidth": 980,
+        "minHeight": 640,
+        "decorations": false,
+        "center": true,
+        "backgroundColor": "#090c0a",
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0 Safari/537.36 Edg/157.0 DeadlockCompanion/0.3.0",
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,CalculateNativeWinOcclusion --disable-gpu --disable-backgrounding-occluded-windows --disable-renderer-backgrounding"
+      }
+    ],
+    "security": {
+      "csp": {
+        "default-src": "'self'",
+        "script-src": "'self'",
+        "style-src": "'self' 'unsafe-inline'",
+        "font-src": "'self'",
+        "img-src": "'self' data: https://*.deadlock-api.com https://*.steamstatic.com",
+        "connect-src": "'self' ipc: http://ipc.localhost https://api.deadlock-api.com"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDdGNTE0NjE5MEEzQzkwQjYKUldTMmtEd0tHVVpSZjNqUE9MVDhPT0V4SVc2SW4vcEFHTDUyRDR6alhOK21SSElxeWRkaUxkSHUK",
+      "endpoints": ["https://github.com/forrestforns/deadlock-companion/releases/latest/download/latest.json"],
+      "windows": { "installMode": "passive" }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "createUpdaterArtifacts": true,
+    "targets": ["nsis"],
+    "icon": ["icons/icon.png", "icons/icon.ico"],
+    "shortDescription": "Compagnon non officiel pour Deadlock : stats, builds, analyse et partie en direct",
+    "copyright": "Application de fan non officielle, non affiliée à Valve Corporation.",
+    "windows": {
+      "webviewInstallMode": { "type": "downloadBootstrapper" },
+      "nsis": { "installMode": "currentUser", "languages": ["French", "English"] }
+    }
+  }
+}

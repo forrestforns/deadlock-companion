@@ -1,0 +1,308 @@
+use crate::{Error, Token, TokenKind, Tokenizer};
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum Lit<'a> {
+    Str(&'a str),
+    Num(usize),
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum Expr<'a> {
+    Ident(&'a str),
+    Lit(Lit<'a>),
+    Pointer(Box<Expr<'a>>),
+    Template {
+        expr: Box<Expr<'a>>,
+        arg: Box<Expr<'a>>,
+    },
+    Array {
+        expr: Box<Expr<'a>>,
+        len: Box<Expr<'a>>,
+    },
+    Path(Box<[Expr<'a>]>),
+}
+
+#[derive(Debug, Clone)]
+struct Parser<'a> {
+    tokenizer: Tokenizer<'a>,
+    prev_token: Option<Token<'a>>,
+}
+
+impl<'a> Parser<'a> {
+    fn new(input: &'a str) -> Self {
+        Self {
+            tokenizer: Tokenizer::new(input),
+            prev_token: None,
+        }
+    }
+
+    #[inline(always)]
+    fn next_token(&mut self) -> Result<Option<Token<'a>>, Error> {
+        if let Some(token) = self.prev_token.take() {
+            Ok(Some(token))
+        } else {
+            self.tokenizer.next().transpose()
+        }
+    }
+
+    #[inline(always)]
+    fn expect_token<F>(&mut self, f: F) -> Result<Token<'a>, Error>
+    where
+        F: FnOnce(&TokenKind<'a>) -> bool,
+    {
+        match self.next_token()? {
+            Some(token) if f(&token.kind) => Ok(token),
+            Some(token) => Err(Error::UnexpectedToken(token.span.start)),
+            None => Err(Error::UnexpectedEof),
+        }
+    }
+
+    fn parse_path(&mut self) -> Result<Expr<'a>, Error> {
+        let segment = {
+            let token = self.expect_token(|k| matches!(k, TokenKind::Ident(_)))?;
+            let TokenKind::Ident(ident) = token.kind else {
+                unreachable!();
+            };
+            Expr::Ident(ident)
+        };
+        match self.next_token()? {
+            Some(Token {
+                kind: TokenKind::ColonColon,
+                ..
+            }) => {}
+            Some(token) => {
+                self.prev_token = Some(token);
+                return Ok(segment);
+            }
+            None => return Ok(segment),
+        }
+
+        let mut segments = vec![segment];
+        loop {
+            let segment = match self.next_token()? {
+                Some(Token {
+                    kind: TokenKind::Ident(ident),
+                    ..
+                }) => Expr::Ident(ident),
+                Some(token) => {
+                    self.prev_token = Some(token);
+                    break;
+                }
+                None => break,
+            };
+            segments.push(segment);
+            match self.next_token()? {
+                Some(Token {
+                    kind: TokenKind::ColonColon,
+                    ..
+                }) => {}
+                Some(next) => {
+                    self.prev_token = Some(next);
+                    break;
+                }
+                None => break,
+            }
+        }
+        Ok(Expr::Path(segments.into_boxed_slice()))
+    }
+
+    /// a template argument may also be a plain number (e.g. `Foo< T, 4 >`)
+    fn parse_template_arg(&mut self) -> Result<(), Error> {
+        match self.next_token()? {
+            Some(Token { kind: TokenKind::Lit(_), .. }) => Ok(()),
+            Some(tok) => {
+                self.prev_token = Some(tok);
+                self.parse().map(|_| ())
+            }
+            None => Err(Error::UnexpectedEof),
+        }
+    }
+
+    fn parse(&mut self) -> Result<Expr<'a>, Error> {
+        let mut expr = self.parse_path()?;
+
+        while let Some(next) = self.next_token()? {
+            match next.kind {
+                TokenKind::LAngle => {
+                    let arg = self.parse()?;
+                    // extra template args (e.g. `Foo< T, N >`) don't affect decoding; keep the first
+                    while let Some(tok) = self.next_token()? {
+                        if tok.kind == TokenKind::Comma {
+                            self.parse_template_arg()?;
+                        } else {
+                            self.prev_token = Some(tok);
+                            break;
+                        }
+                    }
+
+                    let _rangle = self.expect_token(|k| matches!(k, TokenKind::RAngle))?;
+                    expr = Expr::Template {
+                        expr: Box::new(expr),
+                        arg: Box::new(arg),
+                    };
+                }
+                TokenKind::LSquare => {
+                    let token = self.expect_token(|_| true)?;
+                    let len = match token.kind {
+                        TokenKind::Ident(ident) => Expr::Ident(ident),
+                        TokenKind::Lit(lit) => {
+                            let num = lit
+                                .parse::<usize>()
+                                .map_err(|_| Error::UnexpectedToken(token.span.start))?;
+                            Expr::Lit(Lit::Num(num))
+                        }
+                        _ => return Err(Error::UnexpectedToken(token.span.start)),
+                    };
+
+                    let _rsquare = self.expect_token(|k| matches!(k, TokenKind::RSquare))?;
+                    expr = Expr::Array {
+                        expr: Box::new(expr),
+                        len: Box::new(len),
+                    };
+                }
+                TokenKind::Asterisk => {
+                    expr = Expr::Pointer(Box::new(expr));
+                }
+                TokenKind::RAngle | TokenKind::RSquare | TokenKind::Comma => {
+                    self.prev_token = Some(next);
+                    break;
+                }
+                _ => return Err(Error::UnexpectedToken(next.span.start)),
+            }
+        }
+
+        Ok(expr)
+    }
+}
+
+pub fn parse(input: &str) -> Result<Expr<'_>, Error> {
+    Parser::new(input).parse()
+}
+
+#[cfg(test)]
+mod tests {
+    use expect_test::expect;
+
+    use super::*;
+
+    #[test]
+    fn unexpected_eof() {
+        let result = parse("");
+        let expected = expect![[r#"
+            Err(
+                UnexpectedEof,
+            )
+        "#]];
+        expected.assert_debug_eq(&result);
+    }
+
+    #[test]
+    fn unexpected_token() {
+        let result = parse("42");
+        let expected = expect![[r#"
+            Err(
+                UnexpectedToken(
+                    0,
+                ),
+            )
+        "#]];
+        expected.assert_debug_eq(&result);
+    }
+
+    #[test]
+    fn it_works() -> Result<(), Error> {
+        const INPUTS: &[&'static str] = &[
+            "uint64[256]",
+            "CDOTAGameManager*",
+            "CNetworkUtlVectorBase< CHandle< CBasePlayerController > >",
+            "CHandle< CDOTASpecGraphPlayerData >[24]",
+            "CDOTA_AbilityDraftAbilityState[MAX_ABILITY_DRAFT_ABILITIES]",
+            "CCitadel_Ability_Baba_BubblingBrew::EState",
+        ];
+
+        let mut outputs: Vec<Result<Expr<'static>, Error>> = Vec::with_capacity(INPUTS.len());
+
+        INPUTS.iter().for_each(|input| outputs.push(parse(input)));
+
+        let expected = expect![[r#"
+            [
+                Ok(
+                    Array {
+                        expr: Ident(
+                            "uint64",
+                        ),
+                        len: Lit(
+                            Num(
+                                256,
+                            ),
+                        ),
+                    },
+                ),
+                Ok(
+                    Pointer(
+                        Ident(
+                            "CDOTAGameManager",
+                        ),
+                    ),
+                ),
+                Ok(
+                    Template {
+                        expr: Ident(
+                            "CNetworkUtlVectorBase",
+                        ),
+                        arg: Template {
+                            expr: Ident(
+                                "CHandle",
+                            ),
+                            arg: Ident(
+                                "CBasePlayerController",
+                            ),
+                        },
+                    },
+                ),
+                Ok(
+                    Array {
+                        expr: Template {
+                            expr: Ident(
+                                "CHandle",
+                            ),
+                            arg: Ident(
+                                "CDOTASpecGraphPlayerData",
+                            ),
+                        },
+                        len: Lit(
+                            Num(
+                                24,
+                            ),
+                        ),
+                    },
+                ),
+                Ok(
+                    Array {
+                        expr: Ident(
+                            "CDOTA_AbilityDraftAbilityState",
+                        ),
+                        len: Ident(
+                            "MAX_ABILITY_DRAFT_ABILITIES",
+                        ),
+                    },
+                ),
+                Ok(
+                    Path(
+                        [
+                            Ident(
+                                "CCitadel_Ability_Baba_BubblingBrew",
+                            ),
+                            Ident(
+                                "EState",
+                            ),
+                        ],
+                    ),
+                ),
+            ]
+        "#]];
+        expected.assert_debug_eq(&outputs);
+
+        Ok(())
+    }
+}

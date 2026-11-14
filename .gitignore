@@ -1,0 +1,7 @@
+/target
+/dist
+/gen
+# protoc binary (~13 MB): local build tool only, CI installs its own
+/tools
+# never commit update-signing keys
+*.key

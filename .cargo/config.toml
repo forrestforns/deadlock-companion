@@ -1,0 +1,3 @@
+﻿[env]
+# protoc is needed to build the vendored haste (Valve protobufs); bundled under tools/
+PROTOC = { value = "tools/protoc/bin/protoc.exe", relative = true }

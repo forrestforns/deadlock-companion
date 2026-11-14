@@ -1,0 +1,29 @@
+[package]
+name = "deadlock-companion"
+version = "0.3.0"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde_json = "1"
+# live match: Valve's public spectator broadcast, decoded with haste (vendored, see vendor/README.txt)
+haste = { path = "vendor/haste", features = ["broadcast", "deadlock"] }
+reqwest = { version = "0.12", default-features = false, features = ["gzip"] }
+tokio = { version = "1", features = ["rt", "time"] }
+anyhow = "1"
+# signed auto-updates from GitHub Releases
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+
+[dev-dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

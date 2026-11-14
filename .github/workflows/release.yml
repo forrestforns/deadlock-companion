@@ -1,0 +1,40 @@
+# Publishes a signed release when a version tag is pushed: git tag v0.4.0 && git push origin v0.4.0
+# Required repository secrets (Settings > Secrets and variables > Actions):
+#   TAURI_SIGNING_PRIVATE_KEY           content of ~/.tauri/deadlock-companion.key
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  content of ~/.tauri/deadlock-companion.key.password.txt
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      # needed to build the vendored haste (Valve protobufs); overrides tools/protoc from .cargo/config.toml
+      - uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "Deadlock Companion ${{ github.ref_name }}"
+          releaseBody: "Télécharge le fichier *-setup.exe ci-dessous. Si l'app est déjà installée, elle se met à jour toute seule au lancement."
+          releaseDraft: false
+          prerelease: false
+          includeUpdaterJson: true
