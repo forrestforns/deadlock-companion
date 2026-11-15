@@ -63,8 +63,14 @@ fn set_tray_labels(items: tauri::State<TrayItems>, open: String, quit: String) {
 
 const RUN_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
 
+/// Windows' reg.exe by full path: a bare "reg" is first looked up next to the app's own exe.
+fn reg_exe() -> PathBuf {
+    let windir = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
+    PathBuf::from(windir).join("System32").join("reg.exe")
+}
+
 fn reg(args: &[&str]) -> bool {
-    std::process::Command::new("reg")
+    std::process::Command::new(reg_exe())
         .args(args)
         .creation_flags(CREATE_NO_WINDOW)
         .status()
@@ -149,9 +155,14 @@ fn listen_for_second_launch(app: AppHandle) {
     });
 }
 
+/// The app's own pages (http://tauri.localhost on Windows, tauri:// elsewhere).
+fn is_app_url(url: &tauri::Url) -> bool {
+    url.scheme() == "tauri" || url.host_str() == Some("tauri.localhost")
+}
+
 /// Steam install dir from the registry, else the default location.
 fn steam_dir() -> PathBuf {
-    std::process::Command::new("reg")
+    std::process::Command::new(reg_exe())
         .args(["query", r"HKCU\Software\Valve\Steam", "/v", "SteamPath"])
         .creation_flags(CREATE_NO_WINDOW)
         .output()
@@ -295,6 +306,13 @@ fn main() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_notification::init())
+        // the window only ever shows the app itself: no navigation to another site, even from
+        // a malicious value slipped into API data (fake login page inside the app...)
+        .plugin(
+            tauri::plugin::Builder::<tauri::Wry>::new("nav-lock")
+                .on_navigation(|_, url| is_app_url(url))
+                .build(),
+        )
         .setup(|app| {
             use tauri::menu::{Menu, MenuItem};
             use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -390,12 +408,22 @@ mod tests {
         assert_eq!(unsafe { OpenEventW(EVENT_MODIFY_STATE, 0, name.as_ptr()) }, 0, "gone with its last handle");
     }
 
+    #[test]
+    fn window_stays_on_the_app() {
+        let ok = |u: &str| is_app_url(&tauri::Url::parse(u).unwrap());
+        assert!(ok("http://tauri.localhost/index.html"));
+        assert!(ok("tauri://localhost/index.html"));
+        assert!(!ok("https://evil.com/login"));
+        assert!(!ok("http://tauri.localhost.evil.com/"));
+        assert!(!ok("https://api.deadlock-api.com/"));
+    }
+
     /// writes then removes the user's Run key entry: `cargo test autostart_roundtrip -- --ignored --nocapture`
     #[test]
     #[ignore]
     fn autostart_roundtrip() {
         set_autostart(true).unwrap();
-        let out = std::process::Command::new("reg").args(["query", RUN_KEY, "/v", "DeadlockCompanion"]).output().unwrap();
+        let out = std::process::Command::new(reg_exe()).args(["query", RUN_KEY, "/v", "DeadlockCompanion"]).output().unwrap();
         let text = String::from_utf8_lossy(&out.stdout).into_owned();
         println!("{text}");
         assert!(text.contains("\" --minimized"), "exe path must be quoted");

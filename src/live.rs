@@ -151,8 +151,21 @@ async fn read_scoreboard(url: String) -> anyhow::Result<Value> {
     }
 }
 
+/// Only Valve's broadcast servers: the url comes from the API, and this app must never be made to
+/// fetch an arbitrary address (another site, the user's router or local network...).
+fn is_valve_broadcast(url: &str) -> bool {
+    reqwest::Url::parse(url).is_ok_and(|u| {
+        matches!(u.scheme(), "http" | "https")
+            && u.host_str().is_some_and(|h| h.ends_with(".steamcontent.com"))
+            && u.port().is_none()
+    })
+}
+
 #[tauri::command]
 pub async fn live_players(url: String) -> Result<Value, String> {
+    if !is_valve_broadcast(&url) {
+        return Err("adresse de diffusion refusée (pas un serveur de Valve)".into());
+    }
     // haste's parser is not Send: run it on its own single-threaded runtime
     tauri::async_runtime::spawn_blocking(move || {
         let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|e| e.to_string())?;
@@ -199,6 +212,19 @@ mod tests {
         // the hideout's remote server alone is never a match
         assert_eq!(match_id_from_log(&LOG[..LOG.find("11/14 21:38:12").unwrap()]), None);
         assert_eq!(match_id_from_log("nothing"), None);
+    }
+
+    #[test]
+    fn broadcast_urls_from_valve_only() {
+        assert!(is_valve_broadcast("http://dist1-ord1.steamcontent.com/tv/18895867/"));
+        assert!(is_valve_broadcast("https://dist2-fra1.steamcontent.com/tv/1"));
+        assert!(!is_valve_broadcast("http://192.168.1.1/admin"));
+        assert!(!is_valve_broadcast("http://localhost:8080/"));
+        assert!(!is_valve_broadcast("http://evil.com/x.steamcontent.com"));
+        assert!(!is_valve_broadcast("http://steamcontent.com.evil.com/"));
+        assert!(!is_valve_broadcast("http://dist1.steamcontent.com:22/"));
+        assert!(!is_valve_broadcast("file:///C:/Windows/win.ini"));
+        assert!(!is_valve_broadcast("not a url"));
     }
 
     /// manual check of the detection on the real game log (no network): `cargo test log_now -- --ignored --nocapture`

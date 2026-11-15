@@ -98,7 +98,7 @@ function itemTile(id, small = false) {
   const cost = it.cost ? `<span>${tr('{n} âmes', { n: num(it.cost) })}</span>` : '';
   return `<div class="item ${esc(it.item_slot_type || '')} ${small ? 'sm' : ''}">
     <img loading="lazy" src="${esc(img)}" alt="">
-    ${it.item_tier ? `<span class="tier">${TIERS[it.item_tier] || it.item_tier}</span>` : ''}
+    ${it.item_tier ? `<span class="tier">${TIERS[it.item_tier] || Number(it.item_tier)}</span>` : ''}
     <div class="tip"><b>${esc(it.name)}</b>${cost}</div>
   </div>`;
 }
@@ -1554,7 +1554,7 @@ function renderLeaderboard() {
     const name = ids.length === 1
       ? `<button class="link" data-player="${ids[0]}">${esc(e.account_name)}</button>`
       : esc(e.account_name);
-    return `<div class="lb-row ${e.rank <= 3 ? 'top' : ''}"><span class="lb-rank mono">#${e.rank}</span>
+    return `<div class="lb-row ${e.rank <= 3 ? 'top' : ''}"><span class="lb-rank mono">#${Number(e.rank)}</span>
       <span class="lb-name">${name}</span>
       <span class="lb-heroes">${(e.top_hero_ids || []).map((id) => `<img src="${esc(heroImg(id))}" alt="" title="${esc(S.heroById[id]?.name || '')}">`).join('')}</span></div>`;
   }).join('');

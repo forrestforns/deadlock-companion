@@ -23,7 +23,7 @@ jobs:
       tag: ${{ steps.v.outputs.tag }}
       skip: ${{ steps.v.outputs.skip }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - id: v
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -41,19 +41,20 @@ jobs:
     needs: version
     if: needs.version.outputs.skip == 'false'
     runs-on: windows-latest
+    # The update-signing key is given ONLY to the two steps that sign (Check signing key, Build), never to
+    # the whole job: a compromised third-party action could otherwise steal it and sign fake updates.
+    # Third-party actions are pinned to a commit (tags can be moved), the Tauri CLI to an exact version.
     env:
       TAG: ${{ needs.version.outputs.tag }}
-      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
       # needed to build the vendored haste (Valve protobufs)
-      - uses: arduino/setup-protoc@v3
+      - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3.0.0
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -66,23 +67,40 @@ jobs:
       # fail early, with a clear message, if the signing secrets are missing or wrong
       - name: Check signing key
         shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           if (-not $env:TAURI_SIGNING_PRIVATE_KEY) { echo "::error::Secret TAURI_SIGNING_PRIVATE_KEY manquant"; exit 1 }
           if (-not $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD) { echo "::error::Secret TAURI_SIGNING_PRIVATE_KEY_PASSWORD manquant"; exit 1 }
           "test" | Out-File sign-test.txt
-          $out = npx --yes @tauri-apps/cli@2 signer sign sign-test.txt 2>&1 | Out-String
+          $out = npx --yes @tauri-apps/cli@2.12.4 signer sign sign-test.txt 2>&1 | Out-String
           if ($LASTEXITCODE -ne 0) {
             $out -split "`n" | ? { $_.Trim() } | Select-Object -Last 5 | % { echo "::error::Signature impossible: $($_ -replace '%','%25')" }
             exit 1
           }
           "Cle de signature OK"
 
+      # compile WITHOUT the key: the build scripts of every dependency run here
       - name: Build
         shell: pwsh
         run: |
-          npx --yes @tauri-apps/cli@2 build 2>&1 | Tee-Object -FilePath build.log
+          npx --yes @tauri-apps/cli@2.12.4 build --no-bundle 2>&1 | Tee-Object -FilePath build.log
           if ($LASTEXITCODE -ne 0) {
             Get-Content build.log | ? { $_.Trim() } | Select-Object -Last 25 | % { echo "::error::$($_ -replace '%','%25')" }
+            exit 1
+          }
+
+      # installer + its update signature: the only step that gets the key
+      - name: Bundle and sign
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          npx --yes @tauri-apps/cli@2.12.4 bundle 2>&1 | Tee-Object -FilePath bundle.log
+          if ($LASTEXITCODE -ne 0) {
+            Get-Content bundle.log | ? { $_.Trim() } | Select-Object -Last 25 | % { echo "::error::$($_ -replace '%','%25')" }
             exit 1
           }
 
@@ -108,7 +126,7 @@ jobs:
           Get-ChildItem out
 
       # creates the tag on this commit and the release with its files
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: ${{ env.TAG }}
           target_commitish: ${{ github.sha }}
