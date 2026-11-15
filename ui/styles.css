@@ -40,8 +40,13 @@
 
 * { box-sizing: border-box; margin: 0; }
 html, body { height: 100%; }
+/* Vignette + film grain live in the background, behind the content. They used to be full-window
+   overlays (one with mix-blend-mode) above everything: the app renders without GPU, so every scrolled
+   frame re-blended the whole window, which dropped the frame rate in fullscreen. */
 body {
   background:
+    radial-gradient(ellipse at center, transparent 55%, rgba(0, 0, 0, .55)),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.05'/%3E%3C/svg%3E"),
     radial-gradient(1000px 600px at 80% -15%, rgba(220, 183, 108, .09), transparent 60%),
     radial-gradient(900px 600px at -10% 110%, rgba(64, 120, 96, .10), transparent 60%),
     var(--bg);
@@ -50,13 +55,6 @@ body {
   overflow: hidden;
   user-select: none;
 }
-/* film grain + vignette */
-body::before, body::after { content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 50; }
-body::before {
-  opacity: .07; mix-blend-mode: overlay;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-}
-body::after { background: radial-gradient(ellipse at center, transparent 55%, rgba(0, 0, 0, .55)); }
 
 button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
 input, textarea, select { font: inherit; color: var(--text); }
